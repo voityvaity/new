@@ -8,7 +8,7 @@
 
 1. Откройте вкладку **Actions → Build Windows installer** и дождитесь зелёной сборки.
 2. Откройте сборку → **Artifacts → Python-Junior-Mock-Windows** и скачайте ZIP.
-3. Распакуйте ZIP и запустите `Python-Junior-Mock-Setup-1.0.0.exe`.
+3. Распакуйте ZIP и запустите `Python-Junior-Mock-Setup-1.0.1.exe`.
 
 GitHub → Code → Download ZIP скачивает **исходники**, а не установщик. Windows может предупредить о неподписанном издателе.
 
@@ -39,4 +39,4 @@ Electron и electron-builder собирают Windows NSIS-установщик 
 
 Документация API: [GPT-Live WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live) · [Live sessions](https://developers.openai.com/api/docs/guides/live-conversations) · [Delegation](https://developers.openai.com/api/docs/guides/live-delegation).
 
-Дата: 2026-10-10. Проект самостоятельный, QuickCue не изменялся.
+Дата: 2026-10-10. Версия 1.0.1: исправлено отсутствующее фото интервьюера, добавлена проверка JPEG при сборке. Проект самостоятельный, QuickCue не изменялся.

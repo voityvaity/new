@@ -19,6 +19,15 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Run tests
         run: npm test
+      - name: Validate portrait JPEG
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $image = [System.Drawing.Image]::FromFile((Resolve-Path 'assets/interviewer.jpg').Path)
+          try {
+            if ($image.Width -lt 250 -or $image.Height -lt 250) { throw 'Portrait resolution is too small' }
+            Write-Host "Portrait JPEG loaded: $($image.Width)x$($image.Height)"
+          } finally { $image.Dispose() }
       - name: Build Windows EXE
         run: npm run dist
         env:
