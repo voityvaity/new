@@ -1,0 +1,29 @@
+{
+  "name": "python-junior-mock",
+  "productName": "Python Junior Mock",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.pythonjuniormock.windows",
+    "productName": "Python Junior Mock",
+    "directories": {"output": "dist"},
+    "files": ["src/**/*", "assets/**/*", "package.json"],
+    "win": {"target": [{"target": "nsis", "arch": ["x64"]}]},
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "artifactName": "Python-Junior-Mock-Setup-${version}.exe"
+    }
+  }
+}

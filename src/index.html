@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Python Junior Mock</title><link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="shell">
+<header><span class="logo">P<span>•</span></span><strong>Python Junior Mock</strong><span class="pill">ТРЕНИРОВКА</span></header>
+<main>
+<section class="hero">
+ <div class="portrait" id="portrait"><img src="../assets/interviewer.jpg" alt="Портрет виртуального интервьюера"></div>
+ <h1>Александр</h1><p class="job">AI-интервьюер · Junior Python · Яндекс (симуляция)</p>
+ <div class="state"><i id="dot"></i><span id="status" role="status" aria-live="polite">Готов к собеседованию</span></div>
+ <p id="excerpt" class="excerpt">Настоящий голосовой диалог: вопросы, твои ответы, уточнения и оценка.</p>
+</section>
+<section id="panel" class="panel">
+<div id="setup">
+ <label for="key">OpenAI API-ключ</label><input id="key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-...">
+ <div class="two"><label for="count">Количество вопросов</label><select id="count"><option value="5">5 вопросов</option><option value="8" selected>8 вопросов</option><option value="10">10 вопросов</option></select></div>
+ <small>Ключ не сохраняется. OpenAI API оплачивается отдельно от ChatGPT Plus.</small>
+</div>
+<div class="buttons"><button id="start" class="primary">Начать интервью</button><button id="mute" hidden>Выключить микрофон</button><button id="stop" class="danger" hidden>Завершить и оценить</button><button id="retry" hidden>Повторить оценку</button><button id="reset" hidden>Начать заново</button></div>
+<p id="error" class="error" role="alert" hidden></p>
+</section>
+<section id="results" class="results" hidden>
+ <div class="heading"><div><div class="smallcaps">ИТОГ СОБЕСЕДОВАНИЯ</div><h2>Твой результат</h2></div><div class="score"><b id="score">—</b>/10</div></div>
+ <p id="verdict"></p><div class="columns"><div><h3>Что получилось</h3><ul id="strengths"></ul></div><div><h3>Что подтянуть</h3><ul id="improve"></ul></div></div>
+ <h3>Следующие шаги</h3><ul id="steps"></ul><button id="again" class="primary">Пройти ещё раз</button>
+</section>
+</main><footer>Голос GPT-Live-1 · Оценка GPT-6 Luna · Неофициальная практика</footer>
+</div>
+<script src="renderer.js"></script>
+</body></html>
