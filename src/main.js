@@ -26,7 +26,7 @@ function validateSender(event) {
 
 function createWindow() {
   mainWindow=new BrowserWindow({
-    width:900,height:790,minWidth:620,minHeight:650,backgroundColor:'#0b1020',
+    width:1080,height:820,minWidth:730,minHeight:640,backgroundColor:'#0b1020',
     title:'Python Junior Mock',
     webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}
   });

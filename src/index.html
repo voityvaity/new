@@ -1,35 +1,134 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
-<title>Python Junior Mock</title><link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Python Junior Mock</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div class="shell">
-<header><span class="logo">P<span>•</span></span><strong>Python Junior Mock</strong><span class="pill">ТРЕНИРОВКА</span></header>
-<main>
-<section class="hero">
- <div class="portrait" id="portrait"><img src="../assets/interviewer.jpg" alt="Портрет виртуального интервьюера"></div>
- <h1>Александр</h1><p class="job">AI-интервьюер · Junior Python · Яндекс (симуляция)</p>
- <div class="state"><i id="dot"></i><span id="status" role="status" aria-live="polite">Готов к собеседованию</span></div>
- <p id="excerpt" class="excerpt">Настоящий голосовой диалог: вопросы, твои ответы, уточнения и оценка.</p>
-</section>
-<section id="panel" class="panel">
-<div id="setup">
- <label for="key">OpenAI API-ключ</label><input id="key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-...">
- <div class="two"><label for="count">Количество вопросов</label><select id="count"><option value="5">5 вопросов</option><option value="8" selected>8 вопросов</option><option value="10">10 вопросов</option></select></div>
- <small>Ключ не сохраняется. OpenAI API оплачивается отдельно от ChatGPT Plus.</small>
-</div>
-<div class="buttons"><button id="start" class="primary">Начать интервью</button><button id="mute" hidden>Выключить микрофон</button><button id="stop" class="danger" hidden>Завершить и оценить</button><button id="retry" hidden>Повторить оценку</button><button id="reset" hidden>Начать заново</button></div>
-<p id="error" class="error" role="alert" hidden></p>
-</section>
-<section id="results" class="results" hidden>
- <div class="heading"><div><div class="smallcaps">ИТОГ СОБЕСЕДОВАНИЯ</div><h2>Твой результат</h2></div><div class="score"><b id="score">—</b>/10</div></div>
- <p id="verdict"></p><div class="columns"><div><h3>Что получилось</h3><ul id="strengths"></ul></div><div><h3>Что подтянуть</h3><ul id="improve"></ul></div></div>
- <h3>Следующие шаги</h3><ul id="steps"></ul><button id="again" class="primary">Пройти ещё раз</button>
-</section>
-</main><footer>Голос GPT-Live-1 · Оценка GPT-6 Luna · Неофициальная практика</footer>
+<div class="app-shell">
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">JM<span>.</span></div>
+      <div class="brand-name">Junior Mock <span>Подготовка к собеседованию</span></div>
+    </div>
+    <div class="header-right">
+      <span class="header-role">Python Developer · Junior</span>
+      <span id="topStage" class="phase-pill">Подготовка</span>
+    </div>
+  </header>
+
+  <main class="interview-layout">
+    <section class="stage" aria-label="Ваш виртуальный интервьюер">
+      <div class="stage-top">
+        <span class="overline">ВАШ СОБЕСЕДНИК</span>
+        <span class="stage-company">Яндекс <span>·</span> тренировочное интервью</span>
+      </div>
+
+      <div class="photo-area">
+        <div class="portrait-frame" id="portrait">
+          <img src="../assets/interviewer.jpg" alt="Александр — виртуальный интервьюер">
+          <div class="portrait-overlay" aria-hidden="true"></div>
+          <div class="portrait-name">
+            <span class="portrait-label">AI-интервьюер</span>
+            <h1>Александр</h1>
+          </div>
+        </div>
+        <div class="avatar-decoration avatar-decoration-one" aria-hidden="true"></div>
+        <div class="avatar-decoration avatar-decoration-two" aria-hidden="true"></div>
+      </div>
+
+      <div class="stage-bottom">
+        <div class="live-row">
+          <div class="live-status"><span id="dot" class="status-dot" aria-hidden="true"></span><span id="status" role="status" aria-live="polite">Готов к собеседованию</span></div>
+          <span id="timer" class="timer" hidden>00:00</span>
+        </div>
+        <div class="stage-hint"><span class="hint-line" aria-hidden="true"></span><p id="excerpt">Не нужно готовить ответы заранее. Просто общайся голосом.</p></div>
+      </div>
+    </section>
+
+    <aside class="workspace" aria-label="Управление собеседованием">
+      <section id="panel" class="panel">
+        <div id="setup">
+          <div class="eyebrow">НОВАЯ ТРЕНИРОВКА</div>
+          <h2>Потренируемся?</h2>
+          <p class="intro">Как на настоящем интервью: знакомство, Python, технические вопросы и уточнения по твоим ответам.</p>
+
+          <div class="setting-box">
+            <label for="key">Ключ OpenAI API</label>
+            <div class="password-field">
+              <input id="key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-proj-..." aria-describedby="privacy">
+              <button id="showKey" class="reveal-button" type="button" aria-label="Показать ключ" aria-pressed="false">Показать</button>
+            </div>
+            <p id="privacy" class="field-helper">Используется только во время интервью. На компьютер не сохраняется.</p>
+            <label for="count" class="count-label">Основных вопросов</label>
+            <select id="count">
+              <option value="5">5 вопросов · короткое</option>
+              <option value="8" selected>8 вопросов · стандартное</option>
+              <option value="10">10 вопросов · полное</option>
+            </select>
+          </div>
+          <div class="prep-note">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2 4.5 5v6c0 5 3.1 8.9 7.5 11 4.4-2.1 7.5-6 7.5-11V5L12 2Z" stroke="currentColor" stroke-width="1.6"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Это неофициальная симуляция собеседования в Яндекс. Для работы понадобится микрофон и доступ к платному OpenAI API.</span>
+          </div>
+        </div>
+
+        <div id="conversation" hidden>
+          <div class="eyebrow">СОБЕСЕДОВАНИЕ</div>
+          <h2>Разговор начался</h2>
+          <p class="intro">Слушай вопрос и отвечай в своём темпе. Можно попросить повторить.</p>
+          <div class="session-details">
+            <span class="sound-bars" id="soundBars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            <div><strong id="liveSpeaker">В ожидании первого вопроса</strong><span id="plannedCount">8 основных вопросов</span></div>
+          </div>
+          <div class="utterance" aria-live="off">
+            <div class="utterance-label">ПОСЛЕДНЯЯ РЕПЛИКА</div>
+            <p id="liveText">Сейчас Александр начнёт интервью…</p>
+          </div>
+          <button id="toggleTranscript" class="text-button" type="button" aria-expanded="false">Показать расшифровку <span aria-hidden="true">↗</span></button>
+          <div id="transcriptWrap" class="transcript-panel" hidden>
+            <ol id="transcriptList" aria-label="Распознанные реплики"></ol>
+          </div>
+        </div>
+
+        <div id="faultInfo" hidden>
+          <div class="eyebrow">ПРОВЕРКА РЕЗУЛЬТАТА</div>
+          <h2>Проверяем ответы</h2>
+          <p class="intro">Если оценка не появилась, попробуй ещё раз или начни новую тренировку.</p>
+        </div>
+
+        <div class="controls">
+          <button id="start" class="button button-primary" type="button">
+            <svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z" fill="currentColor"/></svg>
+            Начать интервью
+          </button>
+          <button id="mute" class="button button-soft" type="button" hidden>
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <span id="muteLabel">Выключить микрофон</span>
+          </button>
+          <button id="stop" class="button button-danger" type="button" hidden>Завершить и оценить</button>
+          <button id="retry" class="button button-primary" type="button" hidden>Повторить оценку</button>
+          <button id="reset" class="button button-soft" type="button" hidden>Начать заново</button>
+        </div>
+        <p id="error" class="error" role="alert" hidden></p>
+      </section>
+
+      <section id="results" class="results" hidden>
+        <div class="eyebrow">ТВОЙ РЕЗУЛЬТАТ</div>
+        <div class="result-hero"><div><h2>Интервью окончено</h2><p>Вот что удалось и над чем поработать.</p></div><div class="score"><strong id="score">—</strong><span>/10</span></div></div>
+        <p id="verdict" class="verdict"></p>
+        <div class="result-section"><h3><span class="result-symbol positive">✓</span> Сильные стороны</h3><ul id="strengths"></ul></div>
+        <div class="result-section"><h3><span class="result-symbol neutral">→</span> Что улучшить</h3><ul id="improve"></ul></div>
+        <div class="result-section"><h3><span class="result-symbol forward">↗</span> Следующий шаг</h3><ul id="steps"></ul></div>
+        <button id="again" class="button button-primary" type="button">Новое интервью</button>
+      </section>
+      <p class="workspace-footnote">Голосовой формат · GPT-Live-1 · Итоговая оценка после завершения</p>
+    </aside>
+  </main>
 </div>
 <script src="renderer.js"></script>
-</body></html>
+</body>
+</html>
