@@ -1,9 +1,11 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,session} = require('electron');
+const {app,BrowserWindow,ipcMain,session,safeStorage} = require('electron');
+const {createSettingsStore} = require('./secure-settings');
 const path = require('node:path');
 const {makeSession,makeGradeRequest,parseGrade} = require('./logic');
 let mainWindow=null;
 let apiKey=null;
+let settings=null;
 
 async function post(url,key,payload,timeout=60000) {
   const response=await fetch(url,{method:'POST',headers:{
@@ -37,6 +39,7 @@ function createWindow() {
 }
 
 app.whenReady().then(()=>{
+  settings=createSettingsStore({userData:app.getPath('userData'),secureStorage:safeStorage});
   session.defaultSession.setPermissionRequestHandler((contents,permission,callback)=>{
     callback(Boolean(mainWindow&&contents.id===mainWindow.webContents.id&&permission==='media'&&contents.getURL().startsWith('file://')));
   });
@@ -47,7 +50,7 @@ app.on('window-all-closed',()=>{apiKey=null;if(process.platform!=='darwin')app.q
 
 ipcMain.handle('live:create',async(event,payload={})=>{
   validateSender(event);
-  const {key,sdp,count}=payload||{};
+  const {key,sdp,count,rememberKey}=payload||{};
   if(typeof key!=='string'||!key.startsWith('sk-')||key.length>512)throw new Error('Нужен ключ OpenAI API (sk-...).');
   if(typeof sdp!=='string'||!sdp.startsWith('v=0')||sdp.length>65536)throw new Error('Некорректный SDP микрофона.');
   const result=await post('https://api.openai.com/v1/live/sessions',key,{
@@ -56,7 +59,11 @@ ipcMain.handle('live:create',async(event,payload={})=>{
   if(typeof result?.transport?.sdp!=='string'||typeof result?.session?.id!=='string')
     throw new Error('OpenAI не прислал параметры голосового соединения.');
   apiKey=key;
-  return {sdp:result.transport.sdp};
+  let saveWarning=null;
+  try{
+    await settings.save({rememberKey,count,key});
+  } catch(err){saveWarning=err.message;}
+  return {sdp:result.transport.sdp,saveWarning};
 });
 
 ipcMain.handle('interview:grade',async(event,payload={})=>{
@@ -68,3 +75,16 @@ ipcMain.handle('interview:grade',async(event,payload={})=>{
   return result;
 });
 ipcMain.handle('interview:clear',event=>{validateSender(event);apiKey=null;return true;});
+
+ipcMain.handle('settings:get',async event=>{
+  validateSender(event);
+  return settings.read();
+});
+ipcMain.handle('settings:save',async(event,payload)=>{
+  validateSender(event);
+  return settings.save(payload);
+});
+ipcMain.handle('settings:clear-key',async event=>{
+  validateSender(event);
+  return settings.save({key:''});
+});

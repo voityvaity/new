@@ -1,7 +1,7 @@
 {
   "name": "python-junior-mock",
   "productName": "Python Junior Mock",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "main": "src/main.js",
   "scripts": {

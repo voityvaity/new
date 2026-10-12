@@ -166,3 +166,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{
  .sound-bars.speaking i{animation:none}
  .portrait-frame,.button{transition:none}
 }
+
+.remember-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 0}
+.remember-option{display:flex!important;align-items:center;gap:9px;margin:0!important;cursor:pointer}
+.remember-option input{width:16px;height:16px;flex-shrink:0;accent-color:#a8c6ff}
+.clear-key{border:0;background:transparent;color:#a9cbff;min-width:initial;font-size:12px;padding:8px}
+.clear-key:hover{text-decoration:underline}

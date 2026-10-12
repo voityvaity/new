@@ -19,15 +19,16 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Run tests
         run: npm test
-      - name: Validate portrait JPEG
+      - name: Validate high-resolution portrait
         shell: pwsh
         run: |
-          Add-Type -AssemblyName System.Drawing
-          $image = [System.Drawing.Image]::FromFile((Resolve-Path 'assets/interviewer.jpg').Path)
-          try {
-            if ($image.Width -lt 250 -or $image.Height -lt 250) { throw 'Portrait resolution is too small' }
-            Write-Host "Portrait JPEG loaded: $($image.Width)x$($image.Height)"
-          } finally { $image.Dispose() }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path 'assets/interviewer.webp').Path)
+          if ($bytes.Length -lt 7000) { throw 'Portrait too small or corrupted' }
+          $magic = [System.Text.Encoding]::ASCII.GetString($bytes, 0, 4)
+          $format = [System.Text.Encoding]::ASCII.GetString($bytes, 8, 4)
+          if ($magic -ne 'RIFF' -or $format -ne 'WEBP') { throw 'Invalid WebP portrait' }
+          Write-Host "Verified WebP portrait: $($bytes.Length) bytes"
+
       - name: Build Windows EXE
         run: npm run dist
         env:

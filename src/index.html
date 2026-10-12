@@ -29,7 +29,7 @@
 
       <div class="photo-area">
         <div class="portrait-frame" id="portrait">
-          <img src="../assets/interviewer.jpg" alt="Александр — виртуальный интервьюер">
+          <img src="../assets/interviewer.webp" alt="Александр — виртуальный интервьюер">
           <div class="portrait-overlay" aria-hidden="true"></div>
           <div class="portrait-name">
             <span class="portrait-label">AI-интервьюер</span>
@@ -62,7 +62,7 @@
               <input id="key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-proj-..." aria-describedby="privacy">
               <button id="showKey" class="reveal-button" type="button" aria-label="Показать ключ" aria-pressed="false">Показать</button>
             </div>
-            <p id="privacy" class="field-helper">Используется только во время интервью. На компьютер не сохраняется.</p>
+            <div class="remember-row"><label class="remember-option"><input id="rememberKey" type="checkbox" checked> Запомнить ключ на этом ПК</label><button type="button" id="clearKey" class="clear-key">Очистить</button></div><p id="privacy" class="field-helper">Ключ сохраняется локально в зашифрованном виде средствами Windows. Можно отключить сохранение.</p>
             <label for="count" class="count-label">Основных вопросов</label>
             <select id="count">
               <option value="5">5 вопросов · короткое</option>

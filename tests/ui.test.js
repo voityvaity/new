@@ -26,7 +26,7 @@ test('transcript uses text nodes, never HTML injection',()=>{
   assert.doesNotMatch(js,/\.innerHTML\s*=/);
 });
 test('desktop portrait and responsive motion settings',()=>{
-  assert.match(html,/src="\.\.\/assets\/interviewer\.jpg"/);
+  assert.match(html,/src="\.\.\/assets\/interviewer\.webp"/);
   assert.match(css,/@media\(max-width:740px\)/);
   assert.match(css, /prefers-reduced-motion/);
 });

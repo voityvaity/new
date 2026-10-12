@@ -6,6 +6,7 @@ let pc=null, channel=null, microphone=null;
 let transcript=[], requested=8;
 let started=false, finishing=false, grading=false, muted=false, closeResolve=null;
 let greeted=false;
+let savedKeyReady=false;
 let showTranscript=false, clockInterval=null, callStartedAt=0;
 
 function refreshClock(){
@@ -187,7 +188,8 @@ async function begin() {
     const offer=await pc.createOffer();
     await pc.setLocalDescription(offer);
     await waitIce(pc);
-    const answer=await window.desktop.create({key,sdp:pc.localDescription.sdp,count:requested});
+    const answer=await window.desktop.create({key,sdp:pc.localDescription.sdp,count:requested,rememberKey:$('rememberKey').checked});
+    if(answer.saveWarning) status(answer.saveWarning,true);
     $('key').value='';
     await pc.setRemoteDescription({type:'answer',sdp:answer.sdp});
     phase('active');
@@ -246,6 +248,7 @@ function reset() {
   cleanup();
   void window.desktop?.clear();
   transcript=[];finishing=false;grading=false;closeResolve=null;
+  if(savedKeyReady && $('rememberKey').checked)void window.desktop.getPrefs().then(p=>{$('key').value=p.key||'';}).catch(()=>{});
   toggleTranscript(false);
   $('results').hidden=true;
   $('key').type='password';
@@ -264,6 +267,30 @@ $('showKey').addEventListener('click',()=>{
   $('showKey').setAttribute('aria-pressed',String(shown));
 });
 $('toggleTranscript').addEventListener('click',()=>toggleTranscript(!showTranscript));
+async function initSettings(){
+  if(!window.desktop?.getPrefs)return;
+  try {
+    const prefs=await window.desktop.getPrefs();
+    $('rememberKey').checked=prefs.rememberKey!==false;
+    $('count').value=String([5,8,10].includes(Number(prefs.count))?prefs.count:8);
+    $('key').value=prefs.key||'';
+    savedKeyReady=true;
+  } catch {savedKeyReady=false;}
+}
+$('clearKey').addEventListener('click',async()=>{
+  $('key').value='';
+  try{await window.desktop.clearSavedKey();status('Сохранённый ключ очищен');}
+  catch(e){status(e.message||'Не удалось очистить ключ',true);}
+});
+$('rememberKey').addEventListener('change',async()=>{
+  try {
+    if(!$('rememberKey').checked) await window.desktop.clearSavedKey();
+    await window.desktop.savePrefs({rememberKey:$('rememberKey').checked,count:Number($('count').value)});
+  } catch(e){status(e.message||'Не удалось сохранить настройки',true);}
+});
+$('count').addEventListener('change',()=>{
+  void window.desktop?.savePrefs({count:Number($('count').value)}).catch(()=>{});
+});
 $('start').addEventListener('click',begin);
 $('stop').addEventListener('click',()=>{void stop();});
 $('mute').addEventListener('click',()=>{
@@ -282,3 +309,4 @@ window.addEventListener('beforeunload',()=>{
   cleanup();
 });
 phase('idle');
+void initSettings();
