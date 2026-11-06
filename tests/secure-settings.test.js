@@ -34,3 +34,26 @@ test('no unencrypted fallback',async()=>{
     await assert.rejects(fs.readFile(path.join(folder,'settings.json'),'utf8'),{code:'ENOENT'});
   }finally{await fs.rm(folder,{recursive:true,force:true});}
 });
+
+test('report directory and JSON preference survive restart and concurrent updates',async()=>{
+  const folder=await fs.mkdtemp(path.join(os.tmpdir(),'mock-prefs-'));
+  try{
+    const defaults=path.join(folder,'reports-default');
+    const chosen=path.join(folder,'reports-selected');
+    const prefs=createSettingsStore({userData:folder,secureStorage:storage,defaultReportDirectory:defaults});
+    const initial=await prefs.read();
+    assert.equal(initial.reportDirectory,defaults);
+    assert.equal(initial.saveJson,true);
+    await Promise.all([
+      prefs.save({reportDirectory:chosen}),
+      prefs.save({saveJson:false}),
+      prefs.save({count:10})
+    ]);
+    const restarted=createSettingsStore({userData:folder,secureStorage:storage,defaultReportDirectory:defaults});
+    const saved=await restarted.read();
+    assert.equal(saved.reportDirectory,chosen);
+    assert.equal(saved.saveJson,false);
+    assert.equal(saved.count,10);
+    await assert.rejects(prefs.save({reportDirectory:'relative-path'}),/абсолютная/);
+  }finally{await fs.rm(folder,{recursive:true,force:true});}
+});

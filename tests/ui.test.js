@@ -35,3 +35,11 @@ test('explicit API key visibility control and no browser storage',()=>{
   assert.match(js,/input\.type=shown\?'text':'password'/);
   assert.doesNotMatch(js,/localStorage|sessionStorage/);
 });
+
+test('archive folder, JSON option and saved-report feedback are wired into UI',()=>{
+  for(const id of ['reportFolder','chooseReportsFolder','openReportsFolder','saveJson','archiveNotice','archiveStatus','openResultFolder'])
+    assert.match(html,new RegExp('\\bid="'+id+'"'));
+  assert.match(js,/window\.desktop\.chooseReportsFolder\(\)/);
+  assert.match(js,/window\.desktop\.saveDraft\(\{turns\}\)/);
+  assert.match(js,/result\.archive\?\.pdfFile/);
+});

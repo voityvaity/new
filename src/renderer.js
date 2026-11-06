@@ -8,6 +8,7 @@ let started=false, finishing=false, grading=false, muted=false, closeResolve=nul
 let greeted=false;
 let savedKeyReady=false;
 let showTranscript=false, clockInterval=null, callStartedAt=0;
+let draftTimer=null, draftWrite=Promise.resolve();
 
 function refreshClock(){
   if(!callStartedAt)return;
@@ -49,6 +50,22 @@ function toggleTranscript(open){
 }
 
 
+// Throttle writes while speech is streaming; never keep the only transcript in memory.
+function persistDraft() {
+  if(draftTimer)clearTimeout(draftTimer);
+  draftTimer=null;
+  const turns=transcript.map(t=>({...t}));
+  const request=draftWrite.then(()=>window.desktop.saveDraft({turns}));
+  draftWrite=request.catch(error=>{
+    $('archiveNotice').textContent='Не удалось сохранить черновик: '+(error.message||String(error));
+    $('archiveNotice').hidden=false;
+  });
+  return request;
+}
+function scheduleDraft() {
+  if(draftTimer)return;
+  draftTimer=setTimeout(()=>{void persistDraft().catch(()=>{});},800);
+}
 function status(message,error=false) {
   $('status').textContent=message;
   $('error').hidden=!error;
@@ -81,6 +98,8 @@ function cleanup() {
   pc=null;
   sound.srcObject=null;
   stopClock();
+  if(draftTimer)clearTimeout(draftTimer);
+  draftTimer=null;
   started=false;muted=false;greeted=false;
   speech(false);
   $('muteLabel').textContent='Выключить микрофон';
@@ -108,6 +127,7 @@ function appendTranscript(role,delta,start,end) {
     $('liveText').textContent=current.text.trim()||'Ожидаем следующую реплику…';
   }
   if(showTranscript)refreshTranscript();
+  scheduleDraft();
 }
 function onEvent(evt) {
   switch(evt.type) {
@@ -162,6 +182,9 @@ async function begin() {
   $('start').disabled=true;
   $('error').hidden=true;
   transcript=[];requested=Number($('count').value);
+  draftWrite=Promise.resolve();
+  $('archiveNotice').hidden=true;
+  $('archiveNotice').textContent='';
   toggleTranscript(false);
   $('liveSpeaker').textContent='В ожидании первого вопроса';
   $('liveText').textContent='Сейчас Александр начнёт интервью…';
@@ -190,6 +213,10 @@ async function begin() {
     await waitIce(pc);
     const answer=await window.desktop.create({key,sdp:pc.localDescription.sdp,count:requested,rememberKey:$('rememberKey').checked});
     if(answer.saveWarning) status(answer.saveWarning,true);
+    if(answer.archiveWarning){
+      $('archiveNotice').textContent=answer.archiveWarning;
+      $('archiveNotice').hidden=false;
+    }
     $('key').value='';
     await pc.setRemoteDescription({type:'answer',sdp:answer.sdp});
     phase('active');
@@ -216,6 +243,7 @@ async function stop() {
   $('stop').disabled=true;$('mute').disabled=true;
   status('Завершаю собеседование…');
   await disconnectGracefully();
+  try{await persistDraft();}catch{}
   cleanup();
   await grade();
 }
@@ -231,6 +259,13 @@ async function grade() {
     const result=await window.desktop.grade({turns,count:requested});
     $('score').textContent=String(result.score);
     $('verdict').textContent=result.verdict;
+    const saved=Boolean(result.archive?.pdfFile);
+    $('archiveStatus').textContent=saved
+      ? 'Отчёт автоматически сохранён: '+result.archive.pdfFile+
+        (result.archive.jsonFile?' · JSON тоже сохранён':'')
+      : result.archiveWarning||'PDF не сохранён. Проверь папку отчётов.';
+    $('archiveStatus').classList.toggle('warning',!saved);
+    $('openResultFolder').hidden=!saved;
     for(const [element,key] of [['strengths','strengths'],['improve','improve'],['steps','next_steps']]){
       const list=$(element);list.replaceChildren();
       for(const item of result[key]||[]){
@@ -250,6 +285,7 @@ function reset() {
   transcript=[];finishing=false;grading=false;closeResolve=null;
   if(savedKeyReady && $('rememberKey').checked)void window.desktop.getPrefs().then(p=>{$('key').value=p.key||'';}).catch(()=>{});
   toggleTranscript(false);
+  $('archiveNotice').hidden=true;
   $('results').hidden=true;
   $('key').type='password';
   $('showKey').textContent='Показать';
@@ -274,6 +310,8 @@ async function initSettings(){
     $('rememberKey').checked=prefs.rememberKey!==false;
     $('count').value=String([5,8,10].includes(Number(prefs.count))?prefs.count:8);
     $('key').value=prefs.key||'';
+    $('reportFolder').textContent=prefs.reportDirectory||'Папка не выбрана';
+    $('saveJson').checked=prefs.saveJson!==false;
     savedKeyReady=true;
   } catch {savedKeyReady=false;}
 }
@@ -287,6 +325,21 @@ $('rememberKey').addEventListener('change',async()=>{
     if(!$('rememberKey').checked) await window.desktop.clearSavedKey();
     await window.desktop.savePrefs({rememberKey:$('rememberKey').checked,count:Number($('count').value)});
   } catch(e){status(e.message||'Не удалось сохранить настройки',true);}
+});
+$('chooseReportsFolder').addEventListener('click',async()=>{
+  try{
+    const response=await window.desktop.chooseReportsFolder();
+    if(!response.canceled)$('reportFolder').textContent=response.directory;
+  }catch(error){status('Не удалось выбрать папку: '+error.message,true);}
+});
+async function openReportsFolder() {
+  try{await window.desktop.openReportsFolder();}
+  catch(error){status('Не удалось открыть папку: '+error.message,true);}
+}
+$('openReportsFolder').addEventListener('click',()=>{void openReportsFolder();});
+$('openResultFolder').addEventListener('click',()=>{void openReportsFolder();});
+$('saveJson').addEventListener('change',()=>{
+  void window.desktop.savePrefs({saveJson:$('saveJson').checked}).catch(error=>status(error.message,true));
 });
 $('count').addEventListener('change',()=>{
   void window.desktop?.savePrefs({count:Number($('count').value)}).catch(()=>{});

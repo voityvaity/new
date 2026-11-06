@@ -1,11 +1,27 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,session,safeStorage} = require('electron');
+const {app,BrowserWindow,ipcMain,session,safeStorage,dialog,shell} = require('electron');
+const fs = require('node:fs/promises');
 const {createSettingsStore} = require('./secure-settings');
 const path = require('node:path');
-const {makeSession,makeGradeRequest,parseGrade} = require('./logic');
+const {makeSession,makeGradeRequest,parseGrade,questionCount} = require('./logic');
+const {createInterviewArchive} = require('./interview-archive');
 let mainWindow=null;
 let apiKey=null;
 let settings=null;
+let archive=null;
+
+async function printReport(html) {
+  const window = new BrowserWindow({
+    show:false, width:850, height:1100,
+    webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}
+  });
+  try {
+    await window.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));
+    return await window.webContents.printToPDF({pageSize:'A4',printBackground:true});
+  } finally {
+    if(!window.isDestroyed())window.destroy();
+  }
+}
 
 async function post(url,key,payload,timeout=60000) {
   const response=await fetch(url,{method:'POST',headers:{
@@ -39,7 +55,15 @@ function createWindow() {
 }
 
 app.whenReady().then(()=>{
-  settings=createSettingsStore({userData:app.getPath('userData'),secureStorage:safeStorage});
+  const userData=app.getPath('userData');
+  settings=createSettingsStore({
+    userData, secureStorage:safeStorage,
+    defaultReportDirectory:path.join(app.getPath('documents'),'Python Junior Mock','Интервью')
+  });
+  archive=createInterviewArchive({
+    draftDirectory:path.join(userData,'interview-drafts'),
+    generatePdf:printReport
+  });
   session.defaultSession.setPermissionRequestHandler((contents,permission,callback)=>{
     callback(Boolean(mainWindow&&contents.id===mainWindow.webContents.id&&permission==='media'&&contents.getURL().startsWith('file://')));
   });
@@ -59,11 +83,14 @@ ipcMain.handle('live:create',async(event,payload={})=>{
   if(typeof result?.transport?.sdp!=='string'||typeof result?.session?.id!=='string')
     throw new Error('OpenAI не прислал параметры голосового соединения.');
   apiKey=key;
+  let archiveWarning=null;
+  try{await archive.start(questionCount(count));}
+  catch(err){archiveWarning='Не удалось создать черновик интервью: '+err.message;}
   let saveWarning=null;
   try{
     await settings.save({rememberKey,count,key});
   } catch(err){saveWarning=err.message;}
-  return {sdp:result.transport.sdp,saveWarning};
+  return {sdp:result.transport.sdp,saveWarning,archiveWarning};
 });
 
 ipcMain.handle('interview:grade',async(event,payload={})=>{
@@ -71,8 +98,25 @@ ipcMain.handle('interview:grade',async(event,payload={})=>{
   if(!apiKey)throw new Error('Сессия не активна. Начни интервью заново.');
   const request=makeGradeRequest(payload.turns,payload.count);
   const result=parseGrade(await post('https://api.openai.com/v1/responses',apiKey,request,90000));
+  let archiveResult=null;
+  let archiveWarning=null;
+  try{
+    const prefs=await settings.read();
+    archiveResult=await archive.finalize({
+      turns:payload.turns,evaluation:result,
+      reportDirectory:prefs.reportDirectory,saveJson:prefs.saveJson
+    });
+  }catch(err){
+    archiveWarning='Оценка готова, но отчёт не сохранён полностью: '+err.message+
+      '. Черновик можно найти в папке данных приложения.';
+  }
   apiKey=null;
-  return result;
+  return {...result,archive:archiveResult,archiveWarning};
+});
+ipcMain.handle('interview:draft',async(event,payload={})=>{
+  validateSender(event);
+  if(!apiKey)throw new Error('Нет активного интервью.');
+  return archive.snapshot(payload.turns);
 });
 ipcMain.handle('interview:clear',event=>{validateSender(event);apiKey=null;return true;});
 
@@ -83,6 +127,27 @@ ipcMain.handle('settings:get',async event=>{
 ipcMain.handle('settings:save',async(event,payload)=>{
   validateSender(event);
   return settings.save(payload);
+});
+ipcMain.handle('reports:choose-folder',async event=>{
+  validateSender(event);
+  const prefs=await settings.read();
+  const result=await dialog.showOpenDialog(mainWindow,{
+    title:'Выберите папку для результатов собеседований',
+    defaultPath:prefs.reportDirectory,
+    properties:['openDirectory','createDirectory']
+  });
+  if(result.canceled||!result.filePaths.length)return {canceled:true};
+  const directory=result.filePaths[0];
+  await settings.save({reportDirectory:directory});
+  return {canceled:false,directory};
+});
+ipcMain.handle('reports:open-folder',async event=>{
+  validateSender(event);
+  const {reportDirectory}=await settings.read();
+  await fs.mkdir(reportDirectory,{recursive:true});
+  const error=await shell.openPath(reportDirectory);
+  if(error)throw new Error(error);
+  return true;
 });
 ipcMain.handle('settings:clear-key',async event=>{
   validateSender(event);

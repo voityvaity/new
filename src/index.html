@@ -69,6 +69,16 @@
               <option value="8" selected>8 вопросов · стандартное</option>
               <option value="10">10 вопросов · полное</option>
             </select>
+            <div class="archive-options">
+              <div class="archive-title">Автоматическое сохранение интервью</div>
+              <p class="archive-help">После оценки сохраняем PDF в указанную папку. Черновик расшифровки записывается по ходу разговора.</p>
+              <div id="reportFolder" class="archive-path" title="Папка отчётов">Загружаю папку…</div>
+              <div class="archive-actions">
+                <button type="button" id="chooseReportsFolder" class="archive-button">Выбрать папку</button>
+                <button type="button" id="openReportsFolder" class="archive-button">Открыть</button>
+              </div>
+              <label class="archive-json"><input type="checkbox" id="saveJson" checked> Дополнительно сохранять JSON</label>
+            </div>
           </div>
           <div class="prep-note">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2 4.5 5v6c0 5 3.1 8.9 7.5 11 4.4-2.1 7.5-6 7.5-11V5L12 2Z" stroke="currentColor" stroke-width="1.6"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -77,6 +87,7 @@
         </div>
 
         <div id="conversation" hidden>
+          <p id="archiveNotice" class="archive-notice" hidden></p>
           <div class="eyebrow">СОБЕСЕДОВАНИЕ</div>
           <h2>Разговор начался</h2>
           <p class="intro">Слушай вопрос и отвечай в своём темпе. Можно попросить повторить.</p>
@@ -120,6 +131,8 @@
         <div class="eyebrow">ТВОЙ РЕЗУЛЬТАТ</div>
         <div class="result-hero"><div><h2>Интервью окончено</h2><p>Вот что удалось и над чем поработать.</p></div><div class="score"><strong id="score">—</strong><span>/10</span></div></div>
         <p id="verdict" class="verdict"></p>
+        <p id="archiveStatus" class="archive-status" role="status"></p>
+        <button type="button" id="openResultFolder" class="archive-button" hidden>Открыть папку с отчётами</button>
         <div class="result-section"><h3><span class="result-symbol positive">✓</span> Сильные стороны</h3><ul id="strengths"></ul></div>
         <div class="result-section"><h3><span class="result-symbol neutral">→</span> Что улучшить</h3><ul id="improve"></ul></div>
         <div class="result-section"><h3><span class="result-symbol forward">↗</span> Следующий шаг</h3><ul id="steps"></ul></div>

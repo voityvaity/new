@@ -172,3 +172,17 @@ button:focus-visible,input:focus-visible,select:focus-visible{
 .remember-option input{width:16px;height:16px;flex-shrink:0;accent-color:#a8c6ff}
 .clear-key{border:0;background:transparent;color:#a9cbff;min-width:initial;font-size:12px;padding:8px}
 .clear-key:hover{text-decoration:underline}
+
+/* Local interview archive */
+.archive-options{margin-top:20px;padding-top:18px;border-top:1px solid rgba(180,202,239,.14)}
+.archive-title{font-weight:700;font-size:13px;color:#eef5ff;margin-bottom:7px}
+.archive-help{font-size:11px;color:#99aec6;line-height:1.5;margin:0 0 10px}
+.archive-path{font-size:11px;line-height:1.5;color:#cbdcec;background:#101e31;border:1px solid #31435a;padding:10px;border-radius:9px;overflow-wrap:anywhere}
+.archive-actions{display:flex;gap:8px;margin:10px 0 12px}
+.archive-button{border:1px solid #58728e;border-radius:9px;color:#e3edfc;background:#263951;padding:9px 13px;font-size:12px;font-weight:600}
+.archive-button:hover{filter:brightness(1.15)}
+.archive-options .archive-json{display:flex!important;align-items:center;gap:8px;margin:0!important;font-size:11px;font-weight:500;color:#c2d1e1}
+.archive-json input{accent-color:#a8c6ff;width:15px;height:15px}
+.archive-status,.archive-notice{padding:11px 12px;border:1px solid #33576a;border-radius:10px;background:#112e3b;color:#c7e6e9;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.archive-status.warning,.archive-notice{border-color:#946778;background:#3b2532;color:#ffe3e9}
+#openResultFolder{margin:0 0 14px}
