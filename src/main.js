@@ -361,8 +361,11 @@ ipcMain.handle('interview:grade',(event,payload={})=>{
   gradingArchiveId=id;
   const task=(async()=>{
     closeLiveInBackground('grading');
-    let stored=null;
-    if(id)stored=await archive.getEvaluation(id);
+    let stored=null,archiveReadError=null;
+    if(id){
+      try{stored=await archive.getEvaluation(id);}
+      catch(error){archiveReadError=error;}
+    }
     let backup=null;
     if(id && !stored){
       backup=unsavedGradeMemory.get(id)||null;
@@ -373,6 +376,11 @@ ipcMain.handle('interview:grade',(event,payload={})=>{
         }catch(error){console.warn('Cannot read grade recovery:',error.message);}
       }
     }
+    // A damaged/missing archive is not a reason to pay for grading again.
+    // If a rescue grade exists, show it; otherwise fail without an API call.
+    if(archiveReadError && !backup)
+      throw new Error('Архив интервью недоступен: '+archiveReadError.message+
+        '. Новый платный запрос не выполнялся.');
     if(!stored && !backup && !apiKey)
       throw new Error('Нет API-ключа для оценки. Черновик остаётся в истории.');
     const fresh=!stored&&!backup;

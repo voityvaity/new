@@ -13,6 +13,7 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
   let discarded=0;
   let releaseArchive=null,releaseJournal=null;
   let gradeStoreFails=failGradeStoreInitially,gradeRescueFails=failGradeRescueInitially;
+  let gradeReadFails=false;
   let backupGrade=null,copiedText=null,closeChoice=0,closeWarnings=0;
   let win;
   let resolveLive,resolveGrade,gradeRequests=0,creationRequests=0;
@@ -35,7 +36,10 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
       return {id:'archive-1'};
     },
     discardEmpty:async()=>{discarded++;return {removed:true};},
-    getEvaluation:async()=>storedGrade,
+    getEvaluation:async()=>{
+      if(gradeReadFails)throw Error('archive corrupted');
+      return storedGrade;
+    },
     storeEvaluation:async(_id,value)=>{
       if(gradeStoreFails)throw Error('archive disk full');
       storedGrade=value;
@@ -180,6 +184,7 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
     get closeWarnings(){return closeWarnings;},
     allowCloseWithoutSaving(){closeChoice=1;},
     allowGradeStore(){gradeStoreFails=false;},
+    corruptGradeArchive(){gradeReadFails=true;},
     failGradeRescue(){gradeRescueFails=true;},
     releaseArchive:()=>releaseArchive?.(),
     releaseJournal:()=>releaseJournal?.(),
@@ -375,4 +380,34 @@ test('application quit during preflight cancels the entire Live creation task',a
   await h.tick();
   assert.equal(h.creationRequests,0);
   assert.equal(h.quitCalls,1);
+});
+
+test('a corrupt primary archive never causes a new paid grade request',async()=>{
+  const h=makeHarness();await h.tick();
+  const connecting=h.handlers.get('live:create')(h.sender,{
+    key:'sk-valid',sdp:'v=0\\r\\noffer',count:5,rememberKey:false
+  });
+  await h.tick();h.releaseLive();await connecting;
+  h.corruptGradeArchive();
+  await assert.rejects(h.handlers.get('interview:grade')(h.sender,{
+    archiveId:'archive-1',count:5,turns:[{role:'candidate',text:'Не знаю.'}]
+  }),/Архив интервью недоступен/);
+  assert.equal(h.gradeRequests,0);
+});
+test('a paid grade can be recovered even if reading the primary archive fails',async()=>{
+  const h=makeHarness({failGradeStoreInitially:true});await h.tick();
+  const connecting=h.handlers.get('live:create')(h.sender,{
+    key:'sk-valid',sdp:'v=0\\r\\noffer',count:5,rememberKey:false
+  });
+  await h.tick();h.releaseLive();await connecting;
+  const payload={archiveId:'archive-1',count:5,
+    turns:[{role:'candidate',text:'Не знаю.'}]};
+  const initial=h.handlers.get('interview:grade')(h.sender,payload);
+  await h.tick();h.releaseGrade();
+  assert.equal((await initial).recoveryStored,true);
+  h.corruptGradeArchive();
+  const recovered=await h.handlers.get('interview:grade')(h.sender,payload);
+  assert.equal(recovered.score,2);
+  assert.equal(recovered.reusedSavedEvaluation,true);
+  assert.equal(h.gradeRequests,1);
 });
