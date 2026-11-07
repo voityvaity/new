@@ -69,3 +69,15 @@ test('desktop design follows QuickCue semantic neutral/blue system palette',()=>
   assert.match(css,/--surface:\s*#ffffff/);
   assert.doesNotMatch(css,/avatar-decoration|radial-gradient/);
 });
+
+test('live transcript tracker loads before renderer and question counter is reset per interview',()=>{
+ const a=html.indexOf('src="transcript-tracker.js"');
+ const b=html.indexOf('src="renderer.js"');
+ assert.ok(a>0 && b>a,'transcript tracker must load before UI event handlers');
+ assert.match(js,/window\.LiveTranscript\.createTranscriptTracker\(\)/);
+ assert.match(js,/window\.LiveTranscript\.createQuestionTracker\(requested\)/);
+ assert.match(js,/appendTranscript\('candidate',evt\)/);
+ assert.match(js,/appendTranscript\('interviewer',evt\)/);
+ assert.match(js,/progress\.overLimit/);
+ assert.match(js,/observedMainQuestions:questionTracker\.confirmed/);
+});

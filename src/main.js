@@ -85,7 +85,7 @@ ipcMain.handle('live:create',async(event,payload={})=>{
 ipcMain.handle('interview:grade',async(event,payload={})=>{
   validateSender(event);
   if(!apiKey)throw new Error('Сессия не активна. Начни интервью заново.');
-  const request=makeGradeRequest(payload.turns,payload.count);
+  const request=makeGradeRequest(payload.turns,payload.count,payload.observedMainQuestions);
   const result=parseGrade(await post('https://api.openai.com/v1/responses',apiKey,request,90000));
   let archiveResult=null, archiveWarning=null, evaluationSaved=false;
   try{

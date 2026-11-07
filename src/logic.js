@@ -10,11 +10,11 @@ function makeSession(requestedCount) {
   const count = questionCount(requestedCount);
   const instructions = [
     'Ты Александр, виртуальный технический интервьюер. Веди на русском языке реалистичное, уважительное пробное собеседование Junior Python Developer, ориентируясь на вакансию в Яндексе. Ты не сотрудник Яндекса, это неофициальная симуляция.',
-    'Начни с короткого знакомства и первого вопроса. Задавай вопросы по одному и всегда дожидайся ответа кандидата.',
+    'Начни с короткого знакомства и первого вопроса. Каждый НОВЫЙ основной вопрос начинай коротким маркером «Вопрос N:» (например, «Вопрос 1:»), где N — его номер. Это единственный способ приложению проверять количество. Номера идут строго от 1 до '+count+', без пропусков и повторений. Уточняющие вопросы НЕ нумеруй. Вопросы задавай по одному, дожидаясь ответа.',
     'Проведи ровно ' + count + ' ОСНОВНЫХ вопросов. Из них 1–2 общих (мотивация, обучение, работа в команде), другие технические: Python, mutable/immutable, коллекции, функции, исключения, генераторы, ООП, async/await, SQL, HTTP, тесты. Выбирай по уровню Junior и не пытайся охватить все темы.',
     'Если кандидат ответил неполно, можешь задать не более одного краткого УТОЧНЯЮЩЕГО вопроса на тот же основной. Уточнение не увеличивает счёт основных. Если кандидат говорит "не знаю", просто переходи к следующему.',
     'Не подсказывай правильные ответы в ходе интервью. Не требуй писать код — задача голосовая. Будь живым и естественным, избегай шаблонных похвал и длинных объяснений.',
-    'После последнего ответа скажи "Интервью завершено. Нажмите Завершить и оценить". Не начинай новых вопросов и не называй оценку голосом.',
+    'После ответа на основной вопрос '+count+' скажи «Интервью завершено. Нажмите Завершить и оценить». Больше не задавай ни основных, ни уточняющих вопросов. Не называй оценку голосом.',
     'Сохраняй ход разговора и проверяй техническую корректность, при необходимости делегируй задачу backend-модели. Никогда не называй выдуманные вопросы реальными вопросами Яндекса.'
   ].join('\n');
   return {
@@ -24,7 +24,7 @@ function makeSession(requestedCount) {
       type: 'responses',
       responses: {
         model: 'gpt-6-luna',
-        instructions: 'Помоги голосовому интервьюеру проверять техническую корректность ответов кандидата на уровень Junior Python. При необходимости предложи ОДНО короткое уточнение, либо следующий основной вопрос. Следи за количеством основных вопросов: ' + count + '. Не выдумывай опыт кандидата и не выдавай неофициальные вопросы за официальные вопросы Яндекса.',
+        instructions: 'Помоги голосовому интервьюеру проверять техническую корректность ответов кандидата на уровень Junior Python. При необходимости предложи ОДНО короткое уточнение, либо следующий основной вопрос. Следи за точной нумерацией «Вопрос N:» для основных вопросов от 1 до ' + count + ', не нумеруй уточнения и не предлагай вопрос с номером больше '+count+'. Не выдумывай опыт кандидата и не выдавай неофициальные вопросы за официальные вопросы Яндекса.',
         reasoning: { effort: 'low' },
         max_output_tokens: 450
       }
@@ -32,7 +32,7 @@ function makeSession(requestedCount) {
   };
 }
 
-function makeGradeRequest(turns, requestedCount) {
+function makeGradeRequest(turns, requestedCount, observedMainQuestions=null) {
   if (!Array.isArray(turns) || turns.length > 2000) throw new Error('Некорректная расшифровка.');
   const cleaned = turns.filter(t => t && ['interviewer','candidate'].includes(t.role) && typeof t.text === 'string')
     .map(t => ({role:t.role,text:t.text.slice(0,2500).trim()})).filter(t=>t.text);
@@ -41,7 +41,17 @@ function makeGradeRequest(turns, requestedCount) {
   return {
     model: 'gpt-6-luna', store: false,
     instructions: 'Ты объективный оценщик тренировочного голосового собеседования Junior Python Developer (неофициальная симуляция для Яндекса). Оцени ТОЛЬКО ответы кандидата: техническую корректность, понимание и ясность. Не выдумывай опыт, ответы или вопросы. Оценка 1–10 с честным пояснением. Если прозвучало меньше '+questionCount(requestedCount)+' основных вопросов, сообщи об ограничении оценки. Напиши по-русски 2–4 сильные стороны, 2–4 слабости и 2–4 конкретных шага. Будь доброжелательным, но строгим.',
-    input: JSON.stringify({target_questions: questionCount(requestedCount), transcript: cleaned}),
+    input: JSON.stringify({
+      target_questions: questionCount(requestedCount),
+      // A lower bound based only on explicit numbered questions, not a guess
+      // from question marks in the transcript.
+      observed_numbered_main_questions:
+        Number.isInteger(observedMainQuestions) &&
+        observedMainQuestions >= 0 &&
+        observedMainQuestions <= questionCount(requestedCount)
+          ? observedMainQuestions : null,
+      transcript: cleaned
+    }),
     text: {format:{type:'json_schema',name:'evaluation',strict:true,schema:{
       type:'object',additionalProperties:false,properties:{
         score:{type:'integer',minimum:1,maximum:10},

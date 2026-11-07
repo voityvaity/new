@@ -4,6 +4,9 @@ const sound = new Audio();
 sound.autoplay = true;
 let pc=null, channel=null, microphone=null;
 let transcript=[], requested=8;
+let transcriptTracker=window.LiveTranscript.createTranscriptTracker();
+let questionTracker=window.LiveTranscript.createQuestionTracker(requested);
+let limitNoticeSent=false, numberingWarningSent=false, extraQuestionStopped=false;
 let started=false, finishing=false, grading=false, muted=false, closeResolve=null;
 let greeted=false;
 let savedKeyReady=false;
@@ -123,7 +126,9 @@ function phase(mode) {
   $('faultInfo').hidden=!fault;
   $('timer').hidden=!active;
   $('topStage').textContent=idle?'Подготовка':active?'Интервью идёт':fault?'Завершение':'Результат';
-  $('plannedCount').textContent=requested+' основных вопросов';
+  $('plannedCount').textContent=questionTracker.confirmed
+    ? 'Основных вопросов: '+questionTracker.confirmed+' из '+requested
+    : 'План: '+requested+' основных вопросов';
   $('start').hidden=!idle;
   $('mute').hidden=!active;
   $('stop').hidden=!active;
@@ -155,19 +160,42 @@ function send(type,payload={}) {
   channel.send(JSON.stringify({type,...payload}));
   return true;
 }
-function appendTranscript(role,delta,start,end) {
-  if(typeof delta!=='string'||!delta)return;
-  const a=Number.isFinite(start)?start:0;
-  const b=Number.isFinite(end)?end:a;
-  const prev=transcript.at(-1);
-  if(prev&&prev.role===role&&a>=prev.start-300&&a-prev.end<=1200) {
-    prev.text+=delta;
-    prev.end=Math.max(prev.end,b);
-  } else transcript.push({role,text:delta,start:a,end:b});
-  const current=transcript.at(-1);
+function appendTranscript(role,evt) {
+  if(!transcriptTracker.append(role,evt.delta,evt.start_ms,evt.end_ms,evt.event_id))return;
+  // Merge by speaker and timeline, not by whichever speaker delivered the last packet.
+  transcript=transcriptTracker.turns();
+  const current=transcript.filter(t=>t.role===role).at(-1);
   if(current){
     $('liveSpeaker').textContent=role==='candidate'?'Твой ответ':'Александр спрашивает';
     $('liveText').textContent=current.text.trim()||'Ожидаем следующую реплику…';
+  }
+  if(role==='interviewer'){
+    const before=questionTracker.confirmed;
+    const progress=questionTracker.inspect(transcript);
+    if(progress.confirmed!==before)
+      $('plannedCount').textContent='Основных вопросов: '+progress.confirmed+' из '+requested;
+    if(progress.gapDetected&&!numberingWarningSent){
+      numberingWarningSent=true;
+      send('session.instructions.append',{
+        event_id:'question-order-'+Date.now(),delegation_id:null,
+        content:'Соблюдай последовательную нумерацию основных вопросов. Следующий номер: '+
+          (progress.confirmed+1)+'. Уточнения не нумеруй.'
+      });
+    }
+    if(progress.complete&&!limitNoticeSent){
+      limitNoticeSent=true;
+      send('session.instructions.append',{
+        event_id:'questions-complete-'+Date.now(),delegation_id:null,
+        content:'Основных вопросов уже '+requested+' из '+requested+
+          '. Дождись ответа на последний, затем заверши интервью. Не задавай новых вопросов.'
+      });
+    }
+    if(progress.overLimit&&!extraQuestionStopped&&!finishing){
+      extraQuestionStopped=true;
+      status('Лимит основных вопросов достигнут. Завершаю интервью.',true);
+      // Buffered output may still play, but we refuse to continue a new question.
+      void stop();
+    }
   }
   if(showTranscript)refreshTranscript();
   scheduleDraft();
@@ -181,17 +209,17 @@ function onEvent(evt) {
         greeted=true;
         send('session.instructions.append',{
           event_id:'start-'+Date.now(),delegation_id:null,
-          content:'Начни прямо сейчас: представься кратко по-русски как виртуальный интервьюер тренировочного Junior Python собеседования, ориентированного на Яндекс. Сразу задай первый основной вопрос и жди ответа. Не проси пользователя начать.'
+          content:'Начни: кратко представься, затем скажи «Вопрос 1:» и задай первый основной вопрос Junior Python. Дождись ответа. Каждый новый основной вопрос начинай «Вопрос N:». Уточнения не нумеруй.'
         });
       }
       break;
     case 'session.input_transcript.delta':
-      appendTranscript('candidate',evt.delta,evt.start_ms,evt.end_ms);
+      appendTranscript('candidate',evt);
       status('Слушаю твой ответ');speech(false);
       break;
     case 'session.output_transcript.delta':
-      appendTranscript('interviewer',evt.delta,evt.start_ms,evt.end_ms);
-      status('Александр говорит');speech(true);
+      appendTranscript('interviewer',evt);
+      if(!finishing){status('Александр говорит');speech(true);}
       break;
     case 'session.closed':
       if(closeResolve){closeResolve();closeResolve=null;}
@@ -225,6 +253,9 @@ async function begin() {
   $('start').disabled=true;
   $('error').hidden=true;
   transcript=[];requested=Number($('count').value);
+  transcriptTracker=window.LiveTranscript.createTranscriptTracker();
+  questionTracker=window.LiveTranscript.createQuestionTracker(requested);
+  limitNoticeSent=false;numberingWarningSent=false;extraQuestionStopped=false;
   archiveId=null;lastReportId=null;
   draftDirty=false;draftSaving=false;draftDrain=Promise.resolve();
   $('archiveNotice').hidden=true;
@@ -310,7 +341,7 @@ async function grade() {
   status('Оцениваю ответы…');
   try {
     const turns=[...transcript].sort((a,b)=>a.start-b.start);
-    const result=await window.desktop.grade({turns,count:requested,archiveId});
+    const result=await window.desktop.grade({turns,count:requested,archiveId,observedMainQuestions:questionTracker.confirmed});
     $('score').textContent=String(result.score);
     $('verdict').textContent=result.verdict;
     lastReportId=archiveId;
@@ -339,7 +370,11 @@ async function grade() {
 function reset() {
   cleanup();
   void window.desktop?.clear();
-  transcript=[];archiveId=null;lastReportId=null;
+  transcript=[];
+  transcriptTracker=window.LiveTranscript.createTranscriptTracker();
+  questionTracker=window.LiveTranscript.createQuestionTracker(Number($('count').value));
+  limitNoticeSent=false;numberingWarningSent=false;extraQuestionStopped=false;
+  archiveId=null;lastReportId=null;
   finishing=false;grading=false;closeResolve=null;
   if(savedKeyReady && $('rememberKey').checked)void window.desktop.getPrefs().then(p=>{$('key').value=p.key||'';}).catch(()=>{});
   toggleTranscript(false);
