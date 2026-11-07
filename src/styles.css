@@ -181,12 +181,12 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline: 3px sol
 .workspace-footnote { text-align: center; color: var(--subtle); font-size: 11px; line-height: 1.45; margin: auto 0 0; padding: 0 8px 4px; }
 @media(max-width: 1000px) {
   .app-shell { padding: 20px; }
-  .interview-layout { grid-template-columns: minmax(250px,.88fr) minmax(360px,1.12fr); gap: 12px; }
+  .interview-layout { grid-template-columns: minmax(220px,.88fr) minmax(330px,1.12fr); gap: 12px; }
   .stage { padding: 18px; }
   .panel,.results { padding: 22px; }
   .header-role { display: none; }
 }
-@media(max-width: 760px) {
+@media(max-width: 650px) {
   .app-shell { padding: 14px; }
   .app-header { padding-bottom: 14px; }
   .brand-name { font-size: 18px; }
@@ -224,4 +224,18 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline: 3px sol
 .extras .history-box { margin-top: 16px; padding-top: 16px; }
 @media (prefers-reduced-motion: reduce) {
   .extras > summary::after { transition: none; }
+}
+
+/* In the minimum-height window, the primary action remains on-screen. */
+@media (max-height: 720px) and (min-width: 651px) {
+  .app-shell { padding: 12px 16px; }
+  .app-header { padding-bottom: 8px; }
+  .stage { min-height: 0; padding: 12px; }
+  .photo-area { padding: 8px 0; }
+  .portrait-frame { height: min(330px, 47vh); min-height: 210px; }
+  .panel,.results { padding: 15px 18px; }
+  .setting-box { padding: 12px; }
+  .panel h2 { font-size: 24px; }
+  .intro { margin-bottom: 10px; }
+  .controls { padding-top: 12px; }
 }

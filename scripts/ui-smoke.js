@@ -6,10 +6,10 @@ const {app,BrowserWindow,nativeTheme}=require('electron');
 
 app.on('window-all-closed',()=>{});
 
-async function check(mode) {
+async function check(mode,width=1080,height=840) {
   nativeTheme.themeSource=mode;
   const window=new BrowserWindow({
-    width:1080,height:840,show:false,backgroundColor:mode==='dark'?'#000000':'#f2f2f7',
+    width,height,show:false,backgroundColor:mode==='dark'?'#000000':'#f2f2f7',
     webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}
   });
   try{
@@ -48,7 +48,7 @@ async function check(mode) {
     assert.ok(png.length>20000,'Desktop screenshot unexpectedly small');
     const target=path.join(__dirname,'../ui-preview');
     await fs.mkdir(target,{recursive:true});
-    await fs.writeFile(path.join(target,'quickcue-'+mode+'.png'),png);
+    await fs.writeFile(path.join(target,'quickcue-'+mode+(width<1000?'-compact':'')+'.png'),png);
     console.log('QuickCue '+mode+' theme and supplied graphite waveform icon OK; screenshot '+png.length+' bytes');
   } finally {
     if(!window.isDestroyed())window.destroy();
@@ -57,5 +57,7 @@ async function check(mode) {
 app.whenReady().then(async()=>{
   await check('light');
   await check('dark');
+  // Minimum supported Windows size: the user must still see Start without scroll.
+  await check('light',730,640);
   app.quit();
 }).catch(e=>{console.error(e);app.exit(1);});

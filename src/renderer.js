@@ -168,7 +168,7 @@ async function refreshArchiveHistory() {
       li.textContent='Пока нет сохранённых интервью.';
       list.append(li);return;
     }
-    for(const entry of entries.slice(0,20)){
+    for(const entry of entries){
       const li=document.createElement('li');
       const title=document.createElement('span');
       const time=new Date(entry.startedAt).toLocaleString('ru-RU');
