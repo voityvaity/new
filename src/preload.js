@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('desktop', {
   openReportsFolder: () => ipcRenderer.invoke('reports:open-folder'),
   clear: () => ipcRenderer.invoke('interview:clear'),
   getPrefs: () => ipcRenderer.invoke('settings:get'),
+  getDefaultInterviewContext: () => ipcRenderer.invoke('settings:default-interview-context'),
   savePrefs: (settings) => ipcRenderer.invoke('settings:save',settings),
   clearSavedKey: () => ipcRenderer.invoke('settings:clear-key')
 });

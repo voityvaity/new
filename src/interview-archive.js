@@ -2,6 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {randomUUID} = require('node:crypto');
+const {normalizeInterviewContext} = require('./interview-context');
 
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -115,12 +116,13 @@ function createInterviewArchive({draftDirectory, generatePdf}) {
     record.updatedAt = new Date().toISOString();
     await atomicWrite(recordPath(record.id), JSON.stringify(record, null, 2));
   }
-  function start(questionsRequested) {
+  function start(questionsRequested,context={}) {
+    const reference=normalizeInterviewContext(context);
     return enqueue(async () => {
       const next = {
-        schemaVersion:2, status:'in_progress', id:randomUUID(),
+        schemaVersion:3, status:'in_progress', id:randomUUID(),
         startedAt:new Date().toISOString(), questionsRequested,
-        transcript:[]
+        interviewContext:reference, transcript:[]
       };
       await write(next);
       active = next;
@@ -159,6 +161,12 @@ function createInterviewArchive({draftDirectory, generatePdf}) {
       await write(record);
       if (active?.id === id) active = null;
       return {saved:true};
+    });
+  }
+  function getContext(id) {
+    return enqueue(async()=>{
+      const record=await read(id);
+      return normalizeInterviewContext(record.interviewContext||{});
     });
   }
   function getEvaluation(id) {
@@ -216,7 +224,7 @@ function createInterviewArchive({draftDirectory, generatePdf}) {
       return {pdfFile, jsonFile, directory:reportDirectory};
     });
   }
-  return {start, discardEmpty, snapshot, end, getEvaluation, storeEvaluation, list, exportReport};
+  return {start, discardEmpty, snapshot, end, getContext, getEvaluation, storeEvaluation, list, exportReport};
 }
 
 module.exports = {createInterviewArchive, cleanTurns, escapeHtml, durationLabel, reportHtml, filenameFor, atomicWrite};

@@ -81,3 +81,39 @@ test('corrupt settings are reported and never silently overwritten with defaults
     assert.equal(await fs.readFile(filename,'utf8'),'{not valid json');
   }finally{await fs.rm(folder,{recursive:true,force:true});}
 });
+
+test('default candidate profile and empty vacancy appear in existing settings',async()=>{
+  const folder=await fs.mkdtemp(path.join(os.tmpdir(),'mock-profile-'));
+  try{
+    const pref=createSettingsStore({userData:folder,secureStorage:storage});
+    const original=await pref.read();
+    assert.match(original.candidateProfile,/Егор Фенин/);
+    assert.equal(original.targetVacancy,'');
+    await pref.save({count:10});
+    const after=createSettingsStore({userData:folder,secureStorage:storage});
+    assert.equal((await after.read()).candidateProfile,original.candidateProfile);
+  }finally{await fs.rm(folder,{recursive:true,force:true});}
+});
+test('edited or intentionally cleared context is retained on restart',async()=>{
+  const folder=await fs.mkdtemp(path.join(os.tmpdir(),'mock-profile-'));
+  try{
+    const pref=createSettingsStore({userData:folder,secureStorage:storage});
+    await pref.save({candidateProfile:'Проект — FastAPI',targetVacancy:'Python Backend'});
+    const after=createSettingsStore({userData:folder,secureStorage:storage});
+    assert.equal((await after.read()).targetVacancy,'Python Backend');
+    assert.equal((await after.read()).candidateProfile,'Проект — FastAPI');
+    await pref.save({candidateProfile:'',targetVacancy:''});
+    const cleared=await after.read();
+    assert.equal(cleared.candidateProfile,'');
+    assert.equal(cleared.targetVacancy,'');
+  }finally{await fs.rm(folder,{recursive:true,force:true});}
+});
+test('too-long context is rejected without overwriting previous text',async()=>{
+  const folder=await fs.mkdtemp(path.join(os.tmpdir(),'mock-profile-'));
+  try{
+    const pref=createSettingsStore({userData:folder,secureStorage:storage});
+    await pref.save({candidateProfile:'old'});
+    await assert.rejects(pref.save({candidateProfile:'x'.repeat(10001)}),/максимум/);
+    assert.equal((await pref.read()).candidateProfile,'old');
+  }finally{await fs.rm(folder,{recursive:true,force:true});}
+});

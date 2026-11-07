@@ -3,10 +3,12 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const {questionCount: normalizeCount} = require('./logic');
 const {atomicWrite} = require('./interview-archive');
+const {DEFAULT_CANDIDATE_PROFILE,normalizeInterviewContext} = require('./interview-context');
 
 function createSettingsStore({userData, secureStorage, defaultReportDirectory = path.join(userData, 'Интервью')}) {
   const filename=path.join(userData,'settings.json');
-  const defaults=()=>({rememberKey:true,count:8,key:'',reportDirectory:defaultReportDirectory,saveJson:true});
+  const defaults=()=>({rememberKey:true,count:8,key:'',reportDirectory:defaultReportDirectory,saveJson:true,
+    candidateProfile:DEFAULT_CANDIDATE_PROFILE,targetVacancy:''});
   let writes = Promise.resolve();
 
   async function read() {
@@ -16,7 +18,12 @@ function createSettingsStore({userData, secureStorage, defaultReportDirectory = 
       if(raw.secret && secureStorage.isEncryptionAvailable()){
         try{key=secureStorage.decryptString(Buffer.from(raw.secret,'base64'));}catch{key='';}
       }
+      const context=normalizeInterviewContext({
+        candidateProfile:raw.candidateProfile===undefined?DEFAULT_CANDIDATE_PROFILE:raw.candidateProfile,
+        targetVacancy:raw.targetVacancy===undefined?'':raw.targetVacancy
+      });
       return {
+        ...context,
         rememberKey:raw.rememberKey!==false, count:normalizeCount(raw.count), key,
         reportDirectory:typeof raw.reportDirectory==='string' && path.isAbsolute(raw.reportDirectory)
           ? raw.reportDirectory : defaultReportDirectory,
@@ -30,7 +37,8 @@ function createSettingsStore({userData, secureStorage, defaultReportDirectory = 
     }
   }
 
-  async function writeSettings({rememberKey,count,key,reportDirectory,saveJson}={}) {
+  async function writeSettings({rememberKey,count,key,reportDirectory,saveJson,
+    candidateProfile,targetVacancy}={}) {
     const current=await read();
     const remember=rememberKey === undefined ? current.rememberKey : Boolean(rememberKey);
     const n=count===undefined?current.count:normalizeCount(count);
@@ -38,6 +46,10 @@ function createSettingsStore({userData, secureStorage, defaultReportDirectory = 
     const folder=reportDirectory===undefined ? current.reportDirectory : reportDirectory;
     if(typeof folder!=='string'||!path.isAbsolute(folder)) throw new Error('Нужна абсолютная папка для отчётов.');
     const withJson=saveJson===undefined ? current.saveJson : Boolean(saveJson);
+    const context=normalizeInterviewContext({
+      candidateProfile:candidateProfile===undefined?current.candidateProfile:candidateProfile,
+      targetVacancy:targetVacancy===undefined?current.targetVacancy:targetVacancy
+    });
     let secret=null;
     if(remember && finalKey){
       if(!secureStorage.isEncryptionAvailable()){
@@ -46,9 +58,10 @@ function createSettingsStore({userData, secureStorage, defaultReportDirectory = 
       secret=secureStorage.encryptString(finalKey).toString('base64');
     }
     await atomicWrite(filename,JSON.stringify({
-      rememberKey:remember,count:n,secret,reportDirectory:folder,saveJson:withJson
+      rememberKey:remember,count:n,secret,reportDirectory:folder,saveJson:withJson,
+      ...context
     }));
-    return {rememberKey:remember,count:n,hasKey:Boolean(secret),reportDirectory:folder,saveJson:withJson};
+    return {rememberKey:remember,count:n,hasKey:Boolean(secret),reportDirectory:folder,saveJson:withJson,...context};
   }
 
   // Serialize settings changes so concurrent toggles cannot overwrite each other.

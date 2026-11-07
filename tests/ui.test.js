@@ -176,3 +176,17 @@ test('fault heading and reset state correctly distinguish saving from grading',(
   assert.match(js,/\$\('faultTitle'\)\.textContent='Оценка'/);
   assert.match(js,/if\(pendingEnd && !window\.confirm\(/);
 });
+
+test('resume and vacancy are editable but collapsed until requested',()=>{
+  assert.match(html,/<details class="extras" id="interviewContext">/);
+  assert.match(html,/<summary>Резюме и вакансия<\/summary>/);
+  for(const id of ['candidateProfile','targetVacancy','contextSaveStatus','restoreCandidateProfile'])
+    assert.ok(html.includes('id="'+id+'"'),id);
+  assert.match(html,/id="candidateProfile"[^>]+maxlength="10000"/);
+  assert.match(html,/id="targetVacancy"[^>]+maxlength="12000"/);
+  assert.match(js,/await persistInterviewContext\(interviewContext\)/);
+  assert.match(js,/interviewContext\s*\n\s*\}\);/);
+  assert.match(js,/\$\('candidateProfile'\)\.value=prefs\.candidateProfile\|\|''/);
+  assert.match(js,/\$\('targetVacancy'\)\.value=prefs\.targetVacancy\|\|''/);
+  assert.match(js,/getDefaultInterviewContext/);
+});

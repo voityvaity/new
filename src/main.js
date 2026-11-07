@@ -10,6 +10,7 @@ const {createLiveGuard} = require('./live-lifecycle');
 const {createKeyRetentionPolicy} = require('./key-retention');
 const {recoverLiveJournal,canStartLive} = require('./live-journal');
 const {createGradeRecoveryStore} = require('./grade-recovery');
+const {DEFAULT_CANDIDATE_PROFILE,normalizeInterviewContext} = require('./interview-context');
 let mainWindow=null;
 let apiKey=null;
 let settings=null;
@@ -256,6 +257,11 @@ ipcMain.handle('live:create',async(event,payload={})=>{
     throw new Error('Предыдущее платное подключение не подтверждено завершённым. Проверь состояние перед новой попыткой.');
   if(creatingLive || liveGuard.hasActive())
     throw new Error('Предыдущая платная сессия ещё не подтверждена закрытой.');
+  // Freeze a validated snapshot for this interview. Later profile edits only
+  // affect future sessions; never read mutable settings during grading.
+  const interviewContext=normalizeInterviewContext(
+    payload.interviewContext===undefined ? await settings.read() : payload.interviewContext
+  );
   creatingLive=true;
   cancelPendingCreate=false;
   creatingLiveDone=new Promise(resolve=>{resolveCreatingLiveDone=resolve;});
@@ -263,7 +269,7 @@ ipcMain.handle('live:create',async(event,payload={})=>{
   let archiveId=null,requestSent=false,sessionId=null,requestedAt=null;
   try{
     // A disk failure must not leave the user paying for a call with no draft.
-    archiveId=(await archive.start(questionCount(count))).id;
+    archiveId=(await archive.start(questionCount(count),interviewContext)).id;
     // Cancellation during disk I/O must prevent the paid HTTP request.
     if(cancelPendingCreate)throw new Error('Подключение отменено до запроса OpenAI.');
     requestedAt=Date.now();
@@ -272,7 +278,7 @@ ipcMain.handle('live:create',async(event,payload={})=>{
     if(cancelPendingCreate)throw new Error('Подключение отменено до запроса OpenAI.');
     requestSent=true;
     creatingLivePromise=post('https://api.openai.com/v1/live/sessions',key,{
-      session:makeSession(count),transport:{type:'webrtc',sdp}
+      session:makeSession(count,interviewContext),transport:{type:'webrtc',sdp}
     },45000);
     let result;
     try{result=await creatingLivePromise;}
@@ -361,10 +367,12 @@ ipcMain.handle('interview:grade',(event,payload={})=>{
   gradingArchiveId=id;
   const task=(async()=>{
     closeLiveInBackground('grading');
-    let stored=null,archiveReadError=null;
+    let stored=null,archiveReadError=null,interviewContext={};
     if(id){
-      try{stored=await archive.getEvaluation(id);}
-      catch(error){archiveReadError=error;}
+      try{
+        stored=await archive.getEvaluation(id);
+        interviewContext=await archive.getContext(id);
+      }catch(error){archiveReadError=error;}
     }
     let backup=null;
     if(id && !stored){
@@ -386,7 +394,7 @@ ipcMain.handle('interview:grade',(event,payload={})=>{
     const fresh=!stored&&!backup;
     const result=stored||backup||parseGrade(await post(
       'https://api.openai.com/v1/responses',apiKey,
-      makeGradeRequest(payload.turns,payload.count,payload.observedMainQuestions),90000
+      makeGradeRequest(payload.turns,payload.count,payload.observedMainQuestions,interviewContext),90000
     ));
     let recoveryStored=Boolean(stored||(id&&durableGradeBackups.has(id))),evaluationSaved=Boolean(stored);
     if(fresh && id){
@@ -522,6 +530,10 @@ ipcMain.handle('interview:clear',event=>{
 ipcMain.handle('settings:get',async event=>{
   validateSender(event);
   return settings.read();
+});
+ipcMain.handle('settings:default-interview-context',event=>{
+  validateSender(event);
+  return {candidateProfile:DEFAULT_CANDIDATE_PROFILE,targetVacancy:''};
 });
 ipcMain.handle('settings:save',async(event,payload={})=>{
   validateSender(event);

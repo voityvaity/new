@@ -62,6 +62,20 @@
               <option value="10">10 вопросов · полное</option>
             </select>
             <p class="field-helper">Лимит 30 минут</p>
+            <details class="extras" id="interviewContext">
+              <summary>Резюме и вакансия</summary>
+              <div class="context-fields">
+                <label for="candidateProfile">Резюме и опыт</label>
+                <textarea id="candidateProfile" rows="6" maxlength="10000" spellcheck="false" placeholder="Опыт, проекты, образование"></textarea>
+                <label for="targetVacancy">Вакансия</label>
+                <textarea id="targetVacancy" rows="4" maxlength="12000" spellcheck="false" placeholder="Вставь описание вакансии, если оно есть"></textarea>
+                <div class="context-actions">
+                  <span id="contextSaveStatus" role="status" aria-live="polite"></span>
+                  <button id="restoreCandidateProfile" type="button" class="clear-key">Восстановить исходное</button>
+                </div>
+                <p class="context-privacy">Сохраняется на ПК. Передаётся OpenAI при интервью и оценке. Изменения — со следующего интервью.</p>
+              </div>
+            </details>
             <details class="extras" id="extras"><summary>Отчёты и история</summary>
             <div class="archive-options">
               <div class="archive-title">Автоматическое сохранение интервью</div>

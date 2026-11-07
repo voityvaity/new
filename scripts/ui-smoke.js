@@ -27,6 +27,7 @@ async function check(mode,width=1080,height=840) {
       'startRect:(()=>{const r=document.querySelector("#start").getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height};})(),',
       'viewportHeight:window.innerHeight,',
       'extrasCollapsed:!document.querySelector("#extras").open,',
+      'contextCollapsed:!document.querySelector("#interviewContext").open,',
       'fields:!!document.querySelector("#key")&&!!document.querySelector("#count")};',
       '})()'
     ].join('\n');
@@ -37,6 +38,7 @@ async function check(mode,width=1080,height=840) {
     assert.equal(state.accent,mode==='dark'?'#0a84ff':'#007aff');
     assert.equal(state.startVisible,true);
     assert.equal(state.extrasCollapsed,true,'Optional settings must start collapsed');
+    assert.equal(state.contextCollapsed,true,'Resume and vacancy should not clutter setup');
     assert.ok(state.startRect.height>=44,'Primary action is too small');
     assert.ok(state.startRect.top>=0 && state.startRect.bottom<=state.viewportHeight,
       'Start button is outside the visible viewport: '+JSON.stringify(state.startRect)+

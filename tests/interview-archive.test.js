@@ -167,3 +167,32 @@ test('stored evaluation can be reused without another paid model call',async()=>
     assert.deepEqual(await revived.getEvaluation(id),evaluation);
   });
 });
+
+test('context is frozen inside each archive and survives a restart',async()=>{
+  await withTemp(async root=>{
+    const before=makeArchive(root);
+    const original={candidateProfile:'Foodgram Django backend',targetVacancy:'SQL backend role'};
+    const {id}=await before.start(5,original);
+    original.candidateProfile='edited after start';
+    const after=makeArchive(root);
+    assert.deepEqual(await after.getContext(id),
+      {candidateProfile:'Foodgram Django backend',targetVacancy:'SQL backend role'});
+    const saved=JSON.parse(await fs.readFile(path.join(root,'drafts',id+'.json'),'utf8'));
+    assert.equal(saved.schemaVersion,3);
+    assert.equal(saved.interviewContext.targetVacancy,'SQL backend role');
+  });
+});
+test('old archive records without context remain readable and unpersonalized',async()=>{
+  await withTemp(async root=>{
+    const archive=makeArchive(root);
+    const {id}=await archive.start(5);
+    const filename=path.join(root,'drafts',id+'.json');
+    const old=JSON.parse(await fs.readFile(filename,'utf8'));
+    old.schemaVersion=2;
+    delete old.interviewContext;
+    await fs.writeFile(filename,JSON.stringify(old));
+    const restarted=makeArchive(root);
+    assert.deepEqual(await restarted.getContext(id),
+      {candidateProfile:'',targetVacancy:''});
+  });
+});

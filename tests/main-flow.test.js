@@ -17,7 +17,8 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
   let backupGrade=null,copiedText=null,closeChoice=0,closeWarnings=0;
   let win;
   let resolveLive,resolveGrade,gradeRequests=0,creationRequests=0;
-  let storedGrade=null;
+  let storedGrade=null,interviewContext={candidateProfile:'',targetVacancy:''};
+  let liveApiRequest=null,gradeApiRequest=null;
   let destroyed=false,quitCalls=0;
   const prefs={rememberKey:true,count:5,key:'',saveJson:false,reportDirectory:'C:\\MockReports'};
   const fakeSettings={
@@ -29,13 +30,15 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
     }
   };
   const fakeArchive={
-    start:async()=>{
+    start:async(_count,reference={})=>{
+      interviewContext={...reference};
       operationOrder.push('archive');
       if(archiveStartFails)throw Error('disk full');
       if(delayArchiveStart)await new Promise(resolve=>{releaseArchive=resolve;});
       return {id:'archive-1'};
     },
     discardEmpty:async()=>{discarded++;return {removed:true};},
+    getContext:async()=>({...interviewContext}),
     getEvaluation:async()=>{
       if(gradeReadFails)throw Error('archive corrupted');
       return storedGrade;
@@ -134,8 +137,9 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
     Buffer,
     AbortSignal,
     setTimeout,clearTimeout,
-    fetch(url){
+    fetch(url,options={}){
       if(url.endsWith('/live/sessions')){
+        liveApiRequest=JSON.parse(options.body);
         operationOrder.push('http');
         creationRequests++;
         if(rejectLive)return Promise.resolve({
@@ -148,6 +152,7 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
         });});
       }
       if(url.endsWith('/responses')){
+        gradeApiRequest=JSON.parse(options.body);
         gradeRequests++;
         return new Promise(resolve=>{resolveGrade=()=>resolve({
           ok:true,text:async()=>JSON.stringify({
@@ -178,6 +183,9 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
     get creationRequests(){return creationRequests;},
     get gradeRequests(){return gradeRequests;},
     get storedGrade(){return storedGrade;},
+    get archivedContext(){return {...interviewContext};},
+    get liveApiRequest(){return liveApiRequest;},
+    get gradeApiRequest(){return gradeApiRequest;},
     get destroyed(){return destroyed;},
     get backupGrade(){return backupGrade;},
     get copiedText(){return copiedText;},
@@ -410,4 +418,52 @@ test('a paid grade can be recovered even if reading the primary archive fails',a
   assert.equal(recovered.score,2);
   assert.equal(recovered.reusedSavedEvaluation,true);
   assert.equal(h.gradeRequests,1);
+});
+
+test('a customized resume and vacancy reach Live and delegated models',async()=>{
+  const h=makeHarness();await h.tick();
+  const reference={candidateProfile:'Егор: мой Foodgram работает на Django.',
+    targetVacancy:'Python backend: Django/DRF, PostgreSQL и SQL.'};
+  const connection=h.handlers.get('live:create')(h.sender,{
+    key:'sk-test',sdp:'v=0\\r\\noffer',count:5,rememberKey:false,
+    interviewContext:reference
+  });
+  await h.tick();
+  assert.deepEqual(h.archivedContext,reference);
+  assert.match(h.liveApiRequest.session.instructions,/мой Foodgram/);
+  assert.match(h.liveApiRequest.session.delegation.responses.instructions,/Django\/DRF/);
+  h.releaseLive();
+  await connection;
+  assert.equal(h.gradeRequests,0);
+});
+test('grading uses snapshot from archive, not updated settings or caller text',async()=>{
+  const h=makeHarness();await h.tick();
+  const original={candidateProfile:'Изначальный кандидат: Kittygram',
+    targetVacancy:'Вакансия A: Django REST'};
+  const live=h.handlers.get('live:create')(h.sender,{
+    key:'sk-test',sdp:'v=0\\r\\noffer',count:5,rememberKey:false,
+    interviewContext:original
+  });
+  await h.tick();h.releaseLive();await live;
+  await h.handlers.get('settings:save')(h.sender,{
+    candidateProfile:'Изменённый кандидат: что-то другое',targetVacancy:'Вакансия B'
+  });
+  const grading=h.handlers.get('interview:grade')(h.sender,{
+    archiveId:'archive-1',count:5,observedMainQuestions:1,
+    turns:[{role:'candidate',text:'Не знаю.'}],
+    interviewContext:{candidateProfile:'Подменённый профиль',targetVacancy:'Вакансия C'}
+  });
+  await h.tick();h.releaseGrade();await grading;
+  const gradeContext=JSON.parse(h.gradeApiRequest.input).context_for_reference;
+  assert.deepEqual(gradeContext,{
+    candidate_profile:original.candidateProfile,
+    target_vacancy:original.targetVacancy
+  });
+  assert.doesNotMatch(JSON.stringify(gradeContext),/Вакансия B|Вакансия C|Подменённый/);
+});
+test('default editable candidate profile is retrievable without hardcoding UI text',async()=>{
+  const h=makeHarness();await h.tick();
+  const defaults=h.handlers.get('settings:default-interview-context')(h.sender);
+  assert.match(defaults.candidateProfile,/Foodgram/);
+  assert.equal(defaults.targetVacancy,'');
 });

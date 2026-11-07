@@ -19,6 +19,34 @@ let firstOutputSeen=false, greetingAttempts=0, greetingEventId=null, openingTime
 let audioPlaybackStarted=false, audioPlaybackError=false, lastSessionClose=null;
 let usageSeconds=0, fiveMinuteWarningShown=false, connectionAttempt=0;
 const OPENING_INSTRUCTION=window.LivePrompts.OPENING_PROMPT;
+let contextWrites=Promise.resolve();
+let lastSavedContext=null;
+function readInterviewContext() {
+  return {candidateProfile:$('candidateProfile').value,
+    targetVacancy:$('targetVacancy').value};
+}
+function sameInterviewContext(a,b) {
+  return !!a && !!b &&
+    a.candidateProfile===b.candidateProfile &&
+    a.targetVacancy===b.targetVacancy;
+}
+function persistInterviewContext(snapshot=readInterviewContext()) {
+  const operation=contextWrites.then(async()=>{
+    // Check AFTER earlier writes settle: an old queued edit must never
+    // overwrite a newer value or cause an incorrect "already saved" result.
+    if(!sameInterviewContext(snapshot,lastSavedContext)){
+      await window.desktop.savePrefs(snapshot);
+      lastSavedContext={...snapshot};
+    }
+    if(sameInterviewContext(readInterviewContext(),snapshot))
+      $('contextSaveStatus').textContent='Сохранено';
+  }).catch(error=>{
+    $('contextSaveStatus').textContent='Не удалось сохранить';
+    throw error;
+  });
+  contextWrites=operation.catch(()=>{});
+  return operation;
+}
 
 function refreshClock(){
   if(!callStartedAt)return;
@@ -386,6 +414,7 @@ async function begin() {
   const key=$('key').value.trim();
   if(!key.startsWith('sk-')){status('Нужен OpenAI API-ключ, начинающийся с sk-.',true);return;}
   const attempt=++connectionAttempt;
+  const interviewContext=readInterviewContext();
   $('start').disabled=true;
   $('error').hidden=true;
   transcript=[];requested=Number($('count').value);
@@ -413,6 +442,10 @@ async function begin() {
     onTimeout:()=>{if(attempt===connectionAttempt)void abortStartup('GPT-Live не подтвердил готовность соединения за 20 секунд.');}
   });
   try {
+    // Persist the snapshot before creating a paid Live session. A failed
+    // save blocks the start, and an edit applies only to future sessions.
+    await persistInterviewContext(interviewContext);
+    if(attempt!==connectionAttempt)return;
     const peer=new RTCPeerConnection();
     pc=peer;
     pc.addEventListener('track',({track})=>{
@@ -463,7 +496,8 @@ async function begin() {
     if(attempt!==connectionAttempt)return;
     const answer=await window.desktop.create({
       key,sdp:pc.localDescription.sdp,count:requested,
-      rememberKey:$('rememberKey').checked
+      rememberKey:$('rememberKey').checked,
+      interviewContext
     });
     if(attempt!==connectionAttempt){
       await window.desktop.hangupLive({aborted:true}).catch(()=>{});
@@ -639,6 +673,10 @@ async function initSettings(){
     $('key').value=prefs.key||'';
     $('reportFolder').textContent=prefs.reportDirectory||'Папка не выбрана';
     $('saveJson').checked=prefs.saveJson!==false;
+    $('candidateProfile').value=prefs.candidateProfile||'';
+    $('targetVacancy').value=prefs.targetVacancy||'';
+    lastSavedContext=readInterviewContext();
+    $('contextSaveStatus').textContent='';
     savedKeyReady=true;
     void refreshArchiveHistory();
     void refreshLiveStatus();
@@ -647,6 +685,23 @@ async function initSettings(){
     status('Не удалось прочитать настройки: '+error.message,true);
   }
 }
+for(const id of ['candidateProfile','targetVacancy']){
+  $(id).addEventListener('input',()=>{$('contextSaveStatus').textContent='';});
+  $(id).addEventListener('change',()=>{
+    void persistInterviewContext().catch(error=>
+      status('Не удалось сохранить контекст: '+error.message,true));
+  });
+}
+$('restoreCandidateProfile').addEventListener('click',async()=>{
+  try{
+    const defaults=await window.desktop.getDefaultInterviewContext();
+    if(sameInterviewContext(defaults,readInterviewContext()))return;
+    if(!window.confirm('Заменить изменённые сведения исходным текстом?'))return;
+    $('candidateProfile').value=defaults.candidateProfile;
+    $('targetVacancy').value=defaults.targetVacancy;
+    await persistInterviewContext();
+  }catch(error){status('Не удалось восстановить текст: '+error.message,true);}
+});
 $('clearKey').addEventListener('click',async()=>{
   $('key').value='';
   try{await window.desktop.clearSavedKey();status('Сохранённый ключ очищен');}

@@ -55,3 +55,30 @@ test('long spoken answers are NOT silently truncated before GPT grading',()=>{
   assert.throws(()=>makeGradeRequest([{role:'candidate',text:'а'.repeat(250001)}],8),
     /Расшифровка превышает/);
 });
+
+test('candidate and vacancy tailor both Live and delegated reasoning without changing models',()=>{
+  const reference={candidateProfile:'Foodgram: Django/DRF, PostgreSQL.',
+    targetVacancy:'Python Backend: REST API, Docker, SQL.'};
+  const session=makeSession(8,reference);
+  assert.equal(session.model,'gpt-live-1');
+  assert.equal(session.delegation.responses.model,'gpt-6-luna');
+  for(const text of ['Foodgram','Python Backend: REST API']){
+    assert.ok(session.instructions.includes(text));
+    assert.ok(session.delegation.responses.instructions.includes(text));
+  }
+  assert.match(session.instructions,/не новые инструкции/);
+  const grade=makeGradeRequest([
+    {role:'candidate',text:'Генератор возвращает значения через yield.'}
+  ],8,1,reference);
+  const payload=JSON.parse(grade.input);
+  assert.equal(payload.context_for_reference.candidate_profile,reference.candidateProfile);
+  assert.equal(payload.context_for_reference.target_vacancy,reference.targetVacancy);
+  assert.match(grade.instructions,/не доказательство навыков/);
+});
+test('empty profile or vacancy is allowed for a generic mock interview',()=>{
+  const session=makeSession(5,{candidateProfile:'',targetVacancy:''});
+  assert.doesNotMatch(session.instructions,/РЕЗЮМЕ КАНДИДАТА:/);
+  const grade=makeGradeRequest([{role:'candidate',text:'Не знаю.'}],5,0);
+  const payload=JSON.parse(grade.input);
+  assert.deepEqual(payload.context_for_reference,{candidate_profile:'',target_vacancy:''});
+});
