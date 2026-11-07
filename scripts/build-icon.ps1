@@ -4,8 +4,8 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 
 $root = Split-Path -Parent $PSScriptRoot
-$source = Join-Path $root "assets\quickcue-app-icon.png"
-$target = Join-Path $root "assets\quickcue-app-icon.ico"
+$source = Join-Path $root "assets\quickcue-graphite.png"
+$target = Join-Path $root "assets\quickcue-graphite.ico"
 if (-not (Test-Path -LiteralPath $source)) { throw "Missing rendered QuickCue graphite PNG" }
 
 $image = [System.Drawing.Image]::FromFile($source)
