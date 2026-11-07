@@ -28,7 +28,8 @@ test('transcript uses text nodes, never HTML injection',()=>{
 });
 test('desktop portrait and responsive motion settings',()=>{
   assert.match(html,/src="\.\.\/assets\/interviewer\.webp"/);
-  assert.match(css,/@media\(max-width: 760px\)/);
+  assert.match(css,/@media\(max-width: 650px\)/);
+  assert.match(css,/@media \(max-height: 720px\)/);
   assert.match(css, /prefers-reduced-motion/);
 });
 test('explicit API key visibility control and no browser storage',()=>{
