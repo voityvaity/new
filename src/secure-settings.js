@@ -22,7 +22,12 @@ function createSettingsStore({userData, secureStorage, defaultReportDirectory = 
           ? raw.reportDirectory : defaultReportDirectory,
         saveJson:raw.saveJson!==false
       };
-    }catch{return defaults();}
+    }catch(error){
+      if(error.code==='ENOENT')return defaults();
+      // A corrupt/unreadable file must not be overwritten with defaults on
+      // the next Save. Preserve the original for explicit recovery.
+      throw new Error('Не удалось прочитать settings.json: '+error.message);
+    }
   }
 
   async function writeSettings({rememberKey,count,key,reportDirectory,saveJson}={}) {

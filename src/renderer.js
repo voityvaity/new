@@ -11,7 +11,7 @@ let started=false, finishing=false, grading=false, muted=false, closeResolve=nul
 let greeted=false;
 let savedKeyReady=false;
 let showTranscript=false, clockInterval=null, callStartedAt=0;
-let archiveId=null, lastReportId=null;
+let archiveId=null, lastReportId=null, lastGradeCopy='', pendingEnd=null;
 let draftDirty=false, draftSaving=false, draftDrain=Promise.resolve();
 let draftWriteTimer=null;
 let readyGate=null, liveActive=false, liveSessionId=null, liveDeadlineAt=0;
@@ -161,6 +161,10 @@ async function flushDraft(){
 async function refreshArchiveHistory() {
   const list=$('archiveHistory');
   list.replaceChildren();
+  const moreList=$('archiveHistoryMore');
+  const moreDetails=$('historyMore');
+  moreList.replaceChildren();
+  moreDetails.hidden=true;
   try{
     const entries=await window.desktop.listReports();
     if(!entries.length){
@@ -168,7 +172,9 @@ async function refreshArchiveHistory() {
       li.textContent='Пока нет сохранённых интервью.';
       list.append(li);return;
     }
-    for(const entry of entries){
+    moreDetails.hidden=entries.length<=8;
+    $('historyMoreCount').textContent='Остальные интервью ('+Math.max(0,entries.length-8)+')';
+    for(const [idx,entry] of entries.entries()){
       const li=document.createElement('li');
       const title=document.createElement('span');
       const time=new Date(entry.startedAt).toLocaleString('ru-RU');
@@ -188,7 +194,7 @@ async function refreshArchiveHistory() {
         }finally{button.disabled=false;}
       });
       li.append(title,button);
-      list.append(li);
+      (idx<8?list:moreList).append(li);
     }
   }catch(error){
     const li=document.createElement('li');
@@ -214,7 +220,7 @@ async function refreshLiveStatus() {
   }
 }
 function status(message,error=false) {
-  $('status').textContent=message;
+  $('status').textContent=error?'Требуется внимание':message;
   $('error').hidden=!error;
   if(error)$('error').textContent=message;
 }
@@ -228,7 +234,7 @@ function phase(mode) {
   $('timer').hidden=!active;
   $('topStage').textContent=idle?'Подготовка':connecting?'Подключение':active?'Интервью идёт':fault?'Завершение':'Результат';
   $('plannedCount').textContent=questionTracker.confirmed
-    ? questionTracker.confirmed+' / '+requested+' вопросов'
+    ? '≈ '+questionTracker.confirmed+' / '+requested+' вопросов'
     : requested+' вопросов';
   $('start').hidden=!idle;
   $('cancelConnecting').hidden=!connecting;
@@ -282,32 +288,8 @@ function appendTranscript(role,evt) {
     const before=questionTracker.confirmed;
     const progress=questionTracker.inspect(transcript);
     if(progress.confirmed!==before)
-      $('plannedCount').textContent=progress.confirmed+' / '+requested+' вопросов';
-    if(progress.gapDetected&&!numberingWarningSent){
-      numberingWarningSent=true;
-      send('session.instructions.append',{
-        event_id:'question-order-'+Date.now(),delegation_id:null,
-        content:'Соблюдай последовательную нумерацию основных вопросов. Следующий номер: '+
-          (progress.confirmed+1)+'. Уточнения не нумеруй.'
-      });
-    }
-    if(progress.complete&&!limitNoticeSent){
-      limitNoticeSent=true;
-      send('session.instructions.append',{
-        event_id:'questions-complete-'+Date.now(),delegation_id:null,
-        content:'Основных вопросов уже '+requested+' из '+requested+
-          '. Дождись ответа на последний, затем заверши интервью. Не задавай новых вопросов.'
-      });
-    }
-    if(progress.overLimit&&!extraQuestionStopped&&!finishing){
-      // Regex-based observation may mistake a quoted question label for a
-      // real question. Never stop a paid interview based on this heuristic.
-      extraQuestionStopped=true;
-      send('session.instructions.append',{
-        event_id:'extra-question-'+Date.now(),delegation_id:null,
-        content:'Не задавай новых основных вопросов. Дождись ответа на текущий вопрос.'
-      });
-    }
+      $('plannedCount').textContent='≈ '+progress.confirmed+' / '+requested+' вопросов';
+    // Heuristic matches must never control the model or terminate the session.
   }
   if(showTranscript)refreshTranscript();
   scheduleDraft();
@@ -409,8 +391,8 @@ async function begin() {
   transcript=[];requested=Number($('count').value);
   transcriptTracker=window.LiveTranscript.createTranscriptTracker();
   questionTracker=window.LiveTranscript.createQuestionTracker(requested);
-  limitNoticeSent=false;numberingWarningSent=false;extraQuestionStopped=false;
-  archiveId=null;lastReportId=null;
+
+  archiveId=null;lastReportId=null;pendingEnd=null;
   draftDirty=false;draftSaving=false;draftDrain=Promise.resolve();
   if(draftWriteTimer){clearTimeout(draftWriteTimer);draftWriteTimer=null;}
   firstOutputSeen=false;greetingAttempts=0;greetingEventId=null;
@@ -548,23 +530,34 @@ async function stop(reason='manual') {
     $('archiveNotice').textContent='OpenAI не подтвердил закрытие голосовой сессии. Проверь подключение перед новым интервью.';
     $('archiveNotice').hidden=false;
   }
+  let persisted=false;
   try{
     await flushDraft();
-    if(archiveId)await window.desktop.endInterview({
+    if(!archiveId)throw new Error('Не создан черновик интервью.');
+    await window.desktop.endInterview({
       archiveId,turns:transcript.map(t=>({...t})),endedAt
     });
+    persisted=true;
   }catch(error){
-    const previous=$('archiveNotice').hidden?'':$('archiveNotice').textContent+' ';
-    $('archiveNotice').textContent=previous+'Не удалось сохранить окончание интервью: '+error.message;
+    $('archiveNotice').textContent='Не удалось сохранить интервью: '+error.message;
     $('archiveNotice').hidden=false;
   }
   cleanup();
+  if(!persisted){
+    finishing=false;
+    pendingEnd={archiveId,turns:transcript.map(t=>({...t})),endedAt};
+    phase('fault');
+    $('retry').textContent='Повторить сохранение';
+    status('Интервью не сохранено. Освободи место и повтори сохранение.',true);
+    return; // Never start a new paid grading request if the archive failed.
+  }
   await grade();
 }
 async function grade() {
   if(grading)return;
   grading=true;
   phase('fault');
+  $('retry').textContent='Повторить оценку';
   $('retry').hidden=true;
   $('reset').hidden=true;
   status('Оцениваю ответы…');
@@ -575,12 +568,19 @@ async function grade() {
     $('verdict').textContent=result.verdict;
     lastReportId=archiveId;
     const saved=Boolean(result.archive?.pdfFile);
+    lastGradeCopy=[
+      'Оценка: '+result.score+'/10',result.verdict||'',
+      'Сильные стороны:',...(result.strengths||[]).map(x=>'• '+x),
+      'Что улучшить:',...(result.improve||[]).map(x=>'• '+x),
+      'Следующие шаги:',...(result.next_steps||[]).map(x=>'• '+x)
+    ].join('\n');
+    $('copyGrade').hidden=Boolean(result.evaluationSaved);
     $('archiveStatus').textContent=saved
       ? 'Отчёт сохранён'
       : result.archiveWarning||'PDF не сохранён. Проверь папку отчётов.';
     $('archiveStatus').classList.toggle('warning',!saved);
     $('openResultFolder').hidden=!saved;
-    $('retryReport').hidden=saved||!result.evaluationSaved;
+    $('retryReport').hidden=saved||!(result.evaluationSaved||result.recoveryStored);
     for(const [element,key] of [['strengths','strengths'],['improve','improve'],['steps','next_steps']]){
       const list=$(element);list.replaceChildren();
       for(const item of result[key]||[]){
@@ -600,8 +600,8 @@ function reset() {
   transcript=[];
   transcriptTracker=window.LiveTranscript.createTranscriptTracker();
   questionTracker=window.LiveTranscript.createQuestionTracker(Number($('count').value));
-  limitNoticeSent=false;numberingWarningSent=false;extraQuestionStopped=false;
-  archiveId=null;lastReportId=null;
+
+  archiveId=null;lastReportId=null;pendingEnd=null;
   finishing=false;grading=false;closeResolve=null;
   firstOutputSeen=false;greetingAttempts=0;greetingEventId=null;
   audioPlaybackStarted=false;audioPlaybackError=false;lastSessionClose=null;
@@ -639,7 +639,10 @@ async function initSettings(){
     savedKeyReady=true;
     void refreshArchiveHistory();
     void refreshLiveStatus();
-  } catch {savedKeyReady=false;}
+  } catch(error) {
+    savedKeyReady=false;
+    status('Не удалось прочитать настройки: '+error.message,true);
+  }
 }
 $('clearKey').addEventListener('click',async()=>{
   $('key').value='';
@@ -664,12 +667,19 @@ async function openReportsFolder() {
 }
 $('openReportsFolder').addEventListener('click',()=>{void openReportsFolder();});
 $('openResultFolder').addEventListener('click',()=>{void openReportsFolder();});
+$('copyGrade').addEventListener('click',async()=>{
+  try{
+    await window.desktop.copyText(lastGradeCopy);
+    $('archiveStatus').textContent='Результат скопирован';
+  }catch(error){status('Не удалось скопировать результат: '+error.message,true);}
+});
 $('retryReport').addEventListener('click',async()=>{
   if(!lastReportId)return;
   $('retryReport').disabled=true;
   try{
     const saved=await window.desktop.exportReport(lastReportId);
-    $('archiveStatus').textContent='Отчёт сохранён: '+saved.pdfFile;
+    $('archiveStatus').textContent='Отчёт сохранён';
+    $('copyGrade').hidden=true;
     $('archiveStatus').classList.remove('warning');
     $('openResultFolder').hidden=false;
     $('retryReport').hidden=true;
@@ -695,7 +705,7 @@ $('acknowledgeLive').addEventListener('click',async()=>{
   }catch(error){status('Не удалось подтвердить продолжение: '+error.message,true);}
 });
 $('cancelConnecting').addEventListener('click',()=>{
-  void abortStartup('Подключение отменено. Голосовая сессия закрыта.');
+  void abortStartup('Подключение отменено. Проверяю состояние сессии.');
 });
 $('repeatFirstQuestion').addEventListener('click',()=>{
   if(firstOutputSeen && !audioPlaybackStarted){
@@ -718,8 +728,21 @@ $('mute').addEventListener('click',()=>{
   status(muted?'Микрофон выключен':'Слушаю');
 });
 $('retry').addEventListener('click',()=>{
-  // After a network timeout the previous Responses request might have been
-  // charged already. Require informed consent before repeating it.
+  if(pendingEnd){
+    void (async()=>{
+      $('retry').disabled=true;
+      try{
+        await window.desktop.endInterview(pendingEnd);
+        pendingEnd=null;
+        $('retry').textContent='Повторить оценку';
+        await grade();
+      }catch(error){
+        status('Не удалось сохранить интервью: '+error.message,true);
+      }finally{$('retry').disabled=false;}
+    })();
+    return;
+  }
+  // A network timeout does not prove the original Responses request was free.
   if(window.confirm('Повторная оценка может вызвать ещё один платный запрос OpenAI. Продолжить?'))
     void grade();
 });

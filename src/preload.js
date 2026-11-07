@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('desktop', {
     return () => ipcRenderer.removeListener('grade:close-pending',listener);
   },
   grade: (payload) => ipcRenderer.invoke('interview:grade', payload),
+  copyText: (text) => ipcRenderer.invoke('ui:copy-text',{text}),
   saveDraft: (payload) => ipcRenderer.invoke('interview:draft', payload),
   endInterview: (payload) => ipcRenderer.invoke('interview:end', payload),
   listReports: () => ipcRenderer.invoke('reports:list'),

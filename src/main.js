@@ -1,5 +1,5 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,session,safeStorage,dialog,shell} = require('electron');
+const {app,BrowserWindow,ipcMain,session,safeStorage,dialog,shell,clipboard} = require('electron');
 const fs = require('node:fs/promises');
 const {createSettingsStore} = require('./secure-settings');
 const path = require('node:path');
@@ -9,6 +9,7 @@ const {printReport} = require('./pdf-printer');
 const {createLiveGuard} = require('./live-lifecycle');
 const {createKeyRetentionPolicy} = require('./key-retention');
 const {recoverLiveJournal,canStartLive} = require('./live-journal');
+const {createGradeRecoveryStore} = require('./grade-recovery');
 let mainWindow=null;
 let apiKey=null;
 let settings=null;
@@ -16,8 +17,26 @@ let archive=null;
 let liveGuard=null;
 let quitHangupStarted=false;
 let creatingLive=false, cancelPendingCreate=false, creatingLivePromise=null;
+let creatingLiveDone=null,resolveCreatingLiveDone=null;
 const keyRetention=createKeyRetentionPolicy();
 let gradingTask=null, gradingArchiveId=null;
+let gradeRecovery=null;
+const unsavedGradeMemory=new Map();
+const durableGradeBackups=new Set();
+function gradeCouldBeLostOnExit(){
+  return [...unsavedGradeMemory.keys()].some(id=>!durableGradeBackups.has(id));
+}
+async function confirmGradeLoss(windowToClose){
+  if(!gradeCouldBeLostOnExit())return true;
+  const choice=await dialog.showMessageBox(windowToClose,{
+    type:'warning',buttons:['Остаться','Закрыть без сохранения'],
+    defaultId:0,cancelId:0,noLink:true,
+    title:'Результат ещё не сохранён',
+    message:'Оценка получена, но сохранить её на диск не удалось.',
+    detail:'Вернись в приложение, скопируй результат или освободи место на диске.'
+  });
+  return choice.response===1;
+}
 let closureStatusFile=null, storedClosure=null, closureLoaded=Promise.resolve();
 let closureWrites=Promise.resolve();
 function rememberClosure(value) {
@@ -91,13 +110,28 @@ function createWindow() {
       // bounded timeout beyond the Responses HTTP request deadline.
       let timer;
       const limit=new Promise(resolve=>{timer=setTimeout(resolve,105000);});
-      void Promise.race([gradingTask.catch(()=>{}),limit]).finally(()=>{
+      void Promise.race([gradingTask.catch(()=>{}),limit]).then(async()=>{
         clearTimeout(timer);
-        if(!windowToClose.isDestroyed())windowToClose.destroy();
+        if(await confirmGradeLoss(windowToClose)){
+          if(!windowToClose.isDestroyed())windowToClose.destroy();
+        }else windowCloseRequested=false;
+      }).catch(error=>{
+        console.warn('Could not confirm pending grade closure:',error.message);
+        windowCloseRequested=false;
       });
       return;
     }
-    if(!creatingLive && !liveGuard?.hasActive())return;
+    if(!creatingLive && !liveGuard?.hasActive()){
+      if(!gradeCouldBeLostOnExit())return;
+      event.preventDefault();
+      windowCloseRequested=true;
+      const windowToClose=mainWindow;
+      void confirmGradeLoss(windowToClose).then(allowed=>{
+        if(allowed && !windowToClose.isDestroyed())windowToClose.destroy();
+        else windowCloseRequested=false;
+      }).catch(()=>{windowCloseRequested=false;});
+      return;
+    }
     event.preventDefault();
     windowCloseRequested=true;
     const windowToClose=mainWindow;
@@ -143,6 +177,7 @@ app.whenReady().then(()=>{
     draftDirectory:path.join(userData,'interview-drafts'),
     generatePdf:printReport
   });
+  gradeRecovery=createGradeRecoveryStore({directory:path.join(userData,'grade-recovery')});
   liveGuard=createLiveGuard({
     fallbackHangup:hangupRemote,
     notify:payload=>{
@@ -177,16 +212,21 @@ app.on('before-quit',event=>{
       await Promise.race([gradingTask.catch(()=>{}),limit]);
       clearTimeout(gradeTimeout);
     }
-    // Do not abandon a request that might have created a paid session.
-    if(creatingLivePromise){
+    // Wait for the ENTIRE setup task, not just fetch(). The task may still
+    // be creating a draft or writing its preflight journal when Quit occurs.
+    if(creatingLiveDone){
       let timeoutId;
-      const timeout=new Promise(resolve=>{timeoutId=setTimeout(resolve,47000);});
-      await Promise.race([creatingLivePromise.catch(()=>{}),timeout]);
+      const timeout=new Promise(resolve=>{timeoutId=setTimeout(resolve,54000);});
+      await Promise.race([creatingLiveDone,timeout]);
       clearTimeout(timeoutId);
-      if(creatingLive){
-        await rememberClosure({state:'unconfirmed',
-          reason:'window_closed_while_session_creation_pending',
-          at:new Date().toISOString()});
+      if(creatingLive) {
+        try {
+          await rememberClosure({state:'unconfirmed',
+            reason:'app_quit_while_live_create_unresolved',
+            at:new Date().toISOString()});
+        } catch(error) {
+          console.warn('Could not persist interrupted Live setup:',error.message);
+        }
       }
     }
     if(liveGuard?.hasActive()){
@@ -218,14 +258,18 @@ ipcMain.handle('live:create',async(event,payload={})=>{
     throw new Error('Предыдущая платная сессия ещё не подтверждена закрытой.');
   creatingLive=true;
   cancelPendingCreate=false;
+  creatingLiveDone=new Promise(resolve=>{resolveCreatingLiveDone=resolve;});
   const savedKeyRevision=keyRetention.snapshot();
   let archiveId=null,requestSent=false,sessionId=null,requestedAt=null;
   try{
     // A disk failure must not leave the user paying for a call with no draft.
     archiveId=(await archive.start(questionCount(count))).id;
+    // Cancellation during disk I/O must prevent the paid HTTP request.
+    if(cancelPendingCreate)throw new Error('Подключение отменено до запроса OpenAI.');
     requestedAt=Date.now();
     await rememberClosure({state:'creating',archiveId,startedAt:requestedAt,
       at:new Date().toISOString()});
+    if(cancelPendingCreate)throw new Error('Подключение отменено до запроса OpenAI.');
     requestSent=true;
     creatingLivePromise=post('https://api.openai.com/v1/live/sessions',key,{
       session:makeSession(count),transport:{type:'webrtc',sdp}
@@ -268,7 +312,20 @@ ipcMain.handle('live:create',async(event,payload={})=>{
     return {sdp:result.transport.sdp,saveWarning,archiveId,...liveInfo};
   }catch(error){
     if(!requestSent && archiveId){
-      await archive.discardEmpty(archiveId).catch(()=>{});
+      // No remote request was sent: record a terminal local outcome so the
+      // user is not trapped behind a "creating" warning after a disk error.
+      try {
+        await rememberClosure({state:cancelPendingCreate?'creation_cancelled':'preflight_failed',
+          archiveId,reason:cancelPendingCreate?'user_cancelled':'local_io_failure',
+          at:new Date().toISOString()});
+      }catch(writeError){
+        // Fail closed if even the recovery marker cannot be persisted.
+        storedClosure={state:'unconfirmed',archiveId,
+          reason:'local_journal_unwritable',at:new Date().toISOString()};
+        console.warn('Cannot persist safe preflight outcome:',writeError.message);
+      }
+      await archive.discardEmpty(archiveId).catch(error=>
+        console.warn('Cannot clean up empty draft:',error.message));
     }
     // The "active" journal and in-memory guard stay intact after errors
     // that occur once a remote session may exist.
@@ -288,55 +345,74 @@ ipcMain.handle('live:create',async(event,payload={})=>{
     creatingLive=false;
     creatingLivePromise=null;
     cancelPendingCreate=false;
+    resolveCreatingLiveDone?.();
+    creatingLiveDone=null;
+    resolveCreatingLiveDone=null;
   }
 });
 
 ipcMain.handle('interview:grade',(event,payload={})=>{
   validateSender(event);
-  const requestedArchiveId=payload.archiveId||null;
+  const id=payload.archiveId||null;
   if(gradingTask){
-    if(requestedArchiveId && gradingArchiveId===requestedArchiveId)
-      return gradingTask; // duplicate click: share a single paid request.
+    if(id && gradingArchiveId===id)return gradingTask;
     throw new Error('Другая оценка уже выполняется.');
   }
-  gradingArchiveId=requestedArchiveId;
+  gradingArchiveId=id;
   const task=(async()=>{
     closeLiveInBackground('grading');
-    // A completed grade is re-used after a PDF failure, crash or duplicate
-    // request. Never pay twice for data already saved to the archive.
     let stored=null;
-    if(requestedArchiveId){
-      try{stored=await archive.getEvaluation(requestedArchiveId);}
-      catch(error){console.warn('Could not retrieve stored grade:',error.message);}
+    if(id)stored=await archive.getEvaluation(id);
+    let backup=null;
+    if(id && !stored){
+      backup=unsavedGradeMemory.get(id)||null;
+      if(!backup) {
+        try{
+          backup=await gradeRecovery.get(id);
+          if(backup)durableGradeBackups.add(id);
+        }catch(error){console.warn('Cannot read grade recovery:',error.message);}
+      }
     }
-    if(!stored && !apiKey)
-      throw new Error('Нет активного API-ключа для оценки. Сохрани черновик и начни новую тренировку.');
-    const result=stored||parseGrade(await post(
+    if(!stored && !backup && !apiKey)
+      throw new Error('Нет API-ключа для оценки. Черновик остаётся в истории.');
+    const fresh=!stored&&!backup;
+    const result=stored||backup||parseGrade(await post(
       'https://api.openai.com/v1/responses',apiKey,
       makeGradeRequest(payload.turns,payload.count,payload.observedMainQuestions),90000
     ));
-    let archiveResult=null,archiveWarning=null,evaluationSaved=Boolean(stored);
+    let recoveryStored=Boolean(stored||(id&&durableGradeBackups.has(id))),evaluationSaved=Boolean(stored);
+    if(fresh && id){
+      // Persist a small rescue copy before editing the main archive. A disk
+      // failure still leaves an in-memory copy for explicit user export.
+      unsavedGradeMemory.set(id,result);
+      try{
+        await gradeRecovery.save(id,result);
+        recoveryStored=true;
+        durableGradeBackups.add(id);
+      }catch(error){console.warn('Cannot save grade rescue copy:',error.message);}
+    }
+    let archiveResult=null,archiveWarning=null;
     try{
-      if(!requestedArchiveId)throw new Error('Архив интервью недоступен.');
+      if(!id)throw new Error('Архив интервью недоступен.');
       if(!stored){
-        // Save first, then render the PDF. Window closing waits for this work.
-        await archive.storeEvaluation(requestedArchiveId,result);
+        await archive.storeEvaluation(id,result);
         evaluationSaved=true;
+        unsavedGradeMemory.delete(id);
+        durableGradeBackups.delete(id);
+        try{await gradeRecovery.remove(id);}
+        catch(error){console.warn('Cannot remove grade rescue file:',error.message);}
       }
       const prefs=await settings.read();
-      archiveResult=await archive.exportReport(
-        requestedArchiveId,prefs.reportDirectory,prefs.saveJson
-      );
+      archiveResult=await archive.exportReport(id,prefs.reportDirectory,prefs.saveJson);
     }catch(error){
       archiveWarning=evaluationSaved
-        ? 'Оценка сохранена локально. PDF не создан: '+error.message+
-          '. Повтори экспорт без нового запроса к модели.'
-        : 'Не удалось сохранить оценку: '+error.message+
-          '. Скопируй результат с экрана.';
+        ? 'Оценка сохранена. PDF пока не создан: '+error.message
+        : 'Оценка получена, но не сохранена: '+error.message;
     }
     apiKey=null;
-    return {...result,archive:archiveResult,archiveWarning,evaluationSaved,
-      reusedSavedEvaluation:Boolean(stored)};
+    return {...result,archive:archiveResult,archiveWarning,
+      evaluationSaved,recoveryStored:recoveryStored||evaluationSaved,
+      reusedSavedEvaluation:!fresh};
   })();
   gradingTask=task;
   return task.finally(()=>{
@@ -361,8 +437,27 @@ ipcMain.handle('reports:list',async event=>{
 });
 ipcMain.handle('reports:export',async(event,payload={})=>{
   validateSender(event);
+  const id=payload.id;
+  const stored=await archive.getEvaluation(id);
+  if(!stored){
+    let backup=unsavedGradeMemory.get(id)||null;
+    if(!backup)backup=await gradeRecovery.get(id);
+    if(backup){
+      await archive.storeEvaluation(id,backup);
+      unsavedGradeMemory.delete(id);
+      durableGradeBackups.delete(id);
+      await gradeRecovery.remove(id).catch(()=>{});
+    }
+  }
   const prefs=await settings.read();
-  return archive.exportReport(payload.id,prefs.reportDirectory,prefs.saveJson);
+  return archive.exportReport(id,prefs.reportDirectory,prefs.saveJson);
+});
+ipcMain.handle('ui:copy-text',(event,payload={})=>{
+  validateSender(event);
+  if(typeof payload.text!=='string'||payload.text.length>10000)
+    throw new Error('Некорректный текст для копирования.');
+  clipboard.writeText(payload.text);
+  return true;
 });
 ipcMain.handle('live:window-close-ready',event=>{
   validateSender(event);

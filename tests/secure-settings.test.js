@@ -69,3 +69,15 @@ test('settings replacement is atomic and leaves no temporary file after concurre
     assert.ok([5,8,10].includes(raw.count));
   }finally{await fs.rm(folder,{recursive:true,force:true});}
 });
+
+test('corrupt settings are reported and never silently overwritten with defaults',async()=>{
+  const folder=await fs.mkdtemp(path.join(os.tmpdir(),'mock-prefs-'));
+  try{
+    const filename=path.join(folder,'settings.json');
+    await fs.writeFile(filename,'{not valid json','utf8');
+    const prefs=createSettingsStore({userData:folder,secureStorage:storage});
+    await assert.rejects(prefs.read(),/Не удалось прочитать settings.json/);
+    await assert.rejects(prefs.save({count:5}),/Не удалось прочитать settings.json/);
+    assert.equal(await fs.readFile(filename,'utf8'),'{not valid json');
+  }finally{await fs.rm(folder,{recursive:true,force:true});}
+});

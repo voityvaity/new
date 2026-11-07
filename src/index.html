@@ -75,6 +75,10 @@
             <div class="history-box">
               <div class="archive-title">История и восстановление</div>
               <ol id="archiveHistory" class="archive-history"><li>Загружаю историю…</li></ol>
+              <details id="historyMore" class="extras" hidden>
+                <summary id="historyMoreCount">Остальные интервью</summary>
+                <ol id="archiveHistoryMore" class="archive-history"></ol>
+              </details>
             </div>
             </details>
           </div>
@@ -128,6 +132,7 @@
         <p id="archiveStatus" class="archive-status" role="status"></p>
         <button type="button" id="openResultFolder" class="archive-button" hidden>Открыть папку с отчётами</button>
         <button type="button" id="retryReport" class="archive-button" hidden>Повторить сохранение PDF</button>
+        <button type="button" id="copyGrade" class="archive-button" hidden>Скопировать результат</button>
         <div class="result-section"><h3><span class="result-symbol positive">✓</span> Сильные стороны</h3><ul id="strengths"></ul></div>
         <div class="result-section"><h3><span class="result-symbol neutral">→</span> Что улучшить</h3><ul id="improve"></ul></div>
         <div class="result-section"><h3><span class="result-symbol forward">↗</span> Следующий шаг</h3><ul id="steps"></ul></div>

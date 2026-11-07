@@ -80,8 +80,8 @@ test('live transcript tracker loads before renderer and question counter is rese
  assert.match(js,/window\.LiveTranscript\.createQuestionTracker\(requested\)/);
  assert.match(js,/appendTranscript\('candidate',evt\)/);
  assert.match(js,/appendTranscript\('interviewer',evt\)/);
- assert.match(js,/progress\.overLimit/);
  assert.match(js,/observedMainQuestions:questionTracker\.confirmed/);
+ assert.doesNotMatch(js,/send\('session\.instructions\.append'/);
 });
 
 test('connect phase waits for session.started, SDP and data channel',()=>{
@@ -144,6 +144,28 @@ test('minimal preparation separates essentials from optional report controls',()
 test('question estimate cannot forcibly end a paid interview',()=>{
   assert.doesNotMatch(js,/if\(progress\.overLimit[\s\S]{0,380}void stop\(/);
   assert.doesNotMatch(js,/Завершить после ответа/);
-  assert.match(js,/extraQuestionStopped/);
+  assert.doesNotMatch(js,/send\('session\.instructions\.append'/);
   assert.match(html,/Завершить и оценить/);
+});
+
+test('minimal history reveals remaining entries only on demand',()=>{
+  assert.match(html,/id="archiveHistoryMore"/);
+  assert.match(html,/id="historyMore"/);
+  assert.match(js,/entries\.length<=8/);
+  assert.match(js,/(idx<8\?list:moreList)/);
+});
+test('a storage failure blocks paid grading and offers an archive retry',()=>{
+  assert.match(js,/if\(!persisted\)/);
+  assert.match(js,/pendingEnd=\{archiveId/);
+  assert.match(js,/Повторить сохранение/);
+  assert.match(js,/await window\.desktop\.endInterview\(pendingEnd\)/);
+  assert.match(js,/await grade\(\)/);
+});
+test('paid result can be copied on an exceptional total disk failure',()=>{
+  assert.match(html,/id="copyGrade"[^>]*hidden/);
+  assert.match(js,/window\.desktop\.copyText\(lastGradeCopy\)/);
+  assert.match(js,/result\.recoveryStored/);
+});
+test('error text is not shown twice in the interface',()=>{
+  assert.match(js,/\$\('status'\)\.textContent=error\?'Требуется внимание':message/);
 });
