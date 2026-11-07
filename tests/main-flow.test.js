@@ -129,6 +129,7 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
         remove:async()=>{backupGrade=null;}
       })};
       if(name==='./live-journal')return require('../src/live-journal');
+      if(name==='./interview-context')return require('../src/interview-context');
       if(name==='./logic')return models;
       return require(name);
     },
