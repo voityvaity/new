@@ -7,6 +7,7 @@ const {makeSession,makeGradeRequest,parseGrade,questionCount} = require('./logic
 const {createInterviewArchive,atomicWrite} = require('./interview-archive');
 const {printReport} = require('./pdf-printer');
 const {createLiveGuard} = require('./live-lifecycle');
+const {createKeyRetentionPolicy} = require('./key-retention');
 let mainWindow=null;
 let apiKey=null;
 let settings=null;
@@ -14,6 +15,8 @@ let archive=null;
 let liveGuard=null;
 let quitHangupStarted=false;
 let creatingLive=false, cancelPendingCreate=false, creatingLivePromise=null;
+const keyRetention=createKeyRetentionPolicy();
+let gradingTask=null, gradingArchiveId=null;
 let closureStatusFile=null, storedClosure=null, closureLoaded=Promise.resolve();
 let closureWrites=Promise.resolve();
 function rememberClosure(value) {
@@ -74,13 +77,29 @@ function createWindow() {
   mainWindow.removeMenu();
   let windowCloseRequested=false;
   mainWindow.on('close',event=>{
-    if(windowCloseRequested || (!creatingLive && !liveGuard?.hasActive()))return;
+    if(windowCloseRequested){event.preventDefault();return;}
+    if(gradingTask){
+      event.preventDefault();
+      windowCloseRequested=true;
+      const windowToClose=mainWindow;
+      if(!windowToClose.isDestroyed())
+        windowToClose.webContents.send('grade:close-pending');
+      // Keep Electron alive until the paid result has been written, up to a
+      // bounded timeout beyond the Responses HTTP request deadline.
+      let timer;
+      const limit=new Promise(resolve=>{timer=setTimeout(resolve,105000);});
+      void Promise.race([gradingTask.catch(()=>{}),limit]).finally(()=>{
+        clearTimeout(timer);
+        if(!windowToClose.isDestroyed())windowToClose.destroy();
+      });
+      return;
+    }
+    if(!creatingLive && !liveGuard?.hasActive())return;
     event.preventDefault();
     windowCloseRequested=true;
     const windowToClose=mainWindow;
     if(!windowToClose.isDestroyed())
       windowToClose.webContents.send('live:window-close-request');
-    // Never trap the user in a window that cannot be closed.
     setTimeout(()=>{
       if(!windowToClose.isDestroyed())windowToClose.destroy();
     },8500);
@@ -127,11 +146,18 @@ app.whenReady().then(()=>{
 });
 app.on('window-all-closed',()=>{apiKey=null;if(process.platform!=='darwin')app.quit();});
 app.on('before-quit',event=>{
-  if(quitHangupStarted||(!creatingLive && !liveGuard?.hasActive()))return;
+  if(quitHangupStarted||(!creatingLive && !liveGuard?.hasActive() && !gradingTask))return;
   event.preventDefault();
   quitHangupStarted=true;
   cancelPendingCreate=true;
   void (async()=>{
+    // Do not discard an already-paid Responses result during a graceful exit.
+    if(gradingTask){
+      let gradeTimeout;
+      const limit=new Promise(resolve=>{gradeTimeout=setTimeout(resolve,105000);});
+      await Promise.race([gradingTask.catch(()=>{}),limit]);
+      clearTimeout(gradeTimeout);
+    }
     // Do not abandon a request that might have created a paid session.
     if(creatingLivePromise){
       let timeoutId;
@@ -171,6 +197,7 @@ ipcMain.handle('live:create',async(event,payload={})=>{
     throw new Error('Предыдущая платная сессия ещё не подтверждена закрытой.');
   creatingLive=true;
   cancelPendingCreate=false;
+  const savedKeyRevision=keyRetention.snapshot();
   try{
   const requestedAt=Date.now();
   creatingLivePromise=post('https://api.openai.com/v1/live/sessions',key,{
@@ -218,7 +245,9 @@ ipcMain.handle('live:create',async(event,payload={})=>{
   catch(err){archiveWarning='Не удалось создать черновик интервью: '+err.message;}
   let saveWarning=null;
   try{
-    await settings.save({rememberKey,count,key});
+    // If the user cleared the key or changed key retention while connecting,
+    // never resurrect their previous key with this late async write.
+    await settings.save(keyRetention.payload(savedKeyRevision,{rememberKey,count,key}));
   } catch(err){saveWarning=err.message;}
   return {sdp:result.transport.sdp,saveWarning,archiveWarning,archiveId,...liveInfo};
   }finally{
@@ -228,31 +257,58 @@ ipcMain.handle('live:create',async(event,payload={})=>{
   }
 });
 
-ipcMain.handle('interview:grade',async(event,payload={})=>{
+ipcMain.handle('interview:grade',(event,payload={})=>{
   validateSender(event);
-  if(!apiKey)throw new Error('Сессия не активна. Начни интервью заново.');
-  closeLiveInBackground('grading'); // Do not call remote closure "confirmed" until session.closed.
-  const request=makeGradeRequest(payload.turns,payload.count,payload.observedMainQuestions);
-  const result=parseGrade(await post('https://api.openai.com/v1/responses',apiKey,request,90000));
-  let archiveResult=null, archiveWarning=null, evaluationSaved=false;
-  try{
-    if(!payload.archiveId)throw new Error('Архив интервью недоступен.');
-    // Save the already-paid-for evaluation locally BEFORE attempting PDF creation.
-    await archive.storeEvaluation(payload.archiveId,result);
-    evaluationSaved=true;
-    const prefs=await settings.read();
-    archiveResult=await archive.exportReport(
-      payload.archiveId,prefs.reportDirectory,prefs.saveJson
-    );
-  }catch(err){
-    archiveWarning=evaluationSaved
-      ? 'Оценка сохранена локально. PDF не создан: '+err.message+
-        '. Повтори экспорт без нового запроса к модели.'
-      : 'Не удалось надёжно сохранить оценку: '+err.message+
-        '. Скопируй результат с экрана.';
+  const requestedArchiveId=payload.archiveId||null;
+  if(gradingTask){
+    if(requestedArchiveId && gradingArchiveId===requestedArchiveId)
+      return gradingTask; // duplicate click: share a single paid request.
+    throw new Error('Другая оценка уже выполняется.');
   }
-  apiKey=null;
-  return {...result,archive:archiveResult,archiveWarning,evaluationSaved};
+  gradingArchiveId=requestedArchiveId;
+  const task=(async()=>{
+    closeLiveInBackground('grading');
+    // A completed grade is re-used after a PDF failure, crash or duplicate
+    // request. Never pay twice for data already saved to the archive.
+    let stored=null;
+    if(requestedArchiveId){
+      try{stored=await archive.getEvaluation(requestedArchiveId);}
+      catch(error){console.warn('Could not retrieve stored grade:',error.message);}
+    }
+    if(!stored && !apiKey)
+      throw new Error('Нет активного API-ключа для оценки. Сохрани черновик и начни новую тренировку.');
+    const result=stored||parseGrade(await post(
+      'https://api.openai.com/v1/responses',apiKey,
+      makeGradeRequest(payload.turns,payload.count,payload.observedMainQuestions),90000
+    ));
+    let archiveResult=null,archiveWarning=null,evaluationSaved=Boolean(stored);
+    try{
+      if(!requestedArchiveId)throw new Error('Архив интервью недоступен.');
+      if(!stored){
+        // Save first, then render the PDF. Window closing waits for this work.
+        await archive.storeEvaluation(requestedArchiveId,result);
+        evaluationSaved=true;
+      }
+      const prefs=await settings.read();
+      archiveResult=await archive.exportReport(
+        requestedArchiveId,prefs.reportDirectory,prefs.saveJson
+      );
+    }catch(error){
+      archiveWarning=evaluationSaved
+        ? 'Оценка сохранена локально. PDF не создан: '+error.message+
+          '. Повтори экспорт без нового запроса к модели.'
+        : 'Не удалось сохранить оценку: '+error.message+
+          '. Скопируй результат с экрана.';
+    }
+    apiKey=null;
+    return {...result,archive:archiveResult,archiveWarning,evaluationSaved,
+      reusedSavedEvaluation:Boolean(stored)};
+  })();
+  gradingTask=task;
+  return task.finally(()=>{
+    if(gradingTask===task)gradingTask=null;
+    gradingArchiveId=null;
+  });
 });
 ipcMain.handle('interview:draft',async(event,payload={})=>{
   validateSender(event);
@@ -330,8 +386,10 @@ ipcMain.handle('settings:get',async event=>{
   validateSender(event);
   return settings.read();
 });
-ipcMain.handle('settings:save',async(event,payload)=>{
+ipcMain.handle('settings:save',async(event,payload={})=>{
   validateSender(event);
+  if(Object.prototype.hasOwnProperty.call(payload,'rememberKey') ||
+     Object.prototype.hasOwnProperty.call(payload,'key'))keyRetention.changed();
   return settings.save(payload);
 });
 ipcMain.handle('reports:choose-folder',async event=>{
@@ -357,5 +415,6 @@ ipcMain.handle('reports:open-folder',async event=>{
 });
 ipcMain.handle('settings:clear-key',async event=>{
   validateSender(event);
+  keyRetention.changed();
   return settings.save({key:''});
 });

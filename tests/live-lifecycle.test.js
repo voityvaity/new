@@ -162,3 +162,21 @@ test('usage updates are cumulative and the UI timer is formatted consistently',(
   assert.equal(WARNING_REMAINING_MS,300000);
   assert.equal(FIRST_QUESTION_RETRY_MS,12000);
 });
+
+test('transport loss triggers fallback once but never claims WebRTC closure',async()=>{
+  const clock=fakeTimers();let calls=0;
+  const guard=createLiveGuard({
+    fallbackHangup:async()=>{calls++;},
+    schedule:clock.schedule,cancel:clock.cancel
+  });
+  guard.activate({id:'lost-voice',key:'sk-test'});
+  guard.requestClose('manual');
+  guard.transportLost('lost-voice');
+  await tick();
+  assert.equal(calls,1,'fallback must not be cancelled by transport loss');
+  assert.equal(guard.snapshot().state,'unconfirmed');
+  assert.throws(()=>guard.activate({id:'new',key:'sk-new'}),/not confirmed closed/);
+  guard.transportLost('lost-voice');
+  await tick();
+  assert.equal(calls,1,'no duplicate fallback calls');
+});

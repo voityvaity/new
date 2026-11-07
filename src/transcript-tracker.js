@@ -19,10 +19,19 @@ function createTranscriptTracker({gapMs = 1800} = {}) {
     const last = chunks[chunks.length-1];
     // An unavailable timestamp is not evidence of temporal proximity.
     // Delivery still belongs to the correct speaker, but starts a new segment.
-    const merge = !!last && a !== null && last.end !== null &&
+    const opposite=streams[role==='candidate'?'interviewer':'candidate'];
+    // A complete utterance from the other speaker between these fragments
+    // is evidence of a turn boundary, even when the gap is under 1.8 seconds.
+    // Overlapping interjections are allowed without changing speaker ownership.
+    const interrupted=!!last && a!==null && last.end!==null &&
+      opposite.some(x=>x.start!==null && x.end!==null &&
+        x.start>=last.end && x.end<=a && x.end>x.start);
+    const merge = !!last && !interrupted && a !== null && last.end !== null &&
       a >= last.start - 300 && a - last.end <= gapMs;
     if (merge) {
-      last.text += delta; // Important: keep spaces and repeated words exactly.
+      // Preserve ASR fragments, but separate clear sentence boundaries.
+      const boundary=/[.!?…]$/.test(last.text) && /^[А-ЯЁA-Z]/.test(delta);
+      last.text += boundary && !/\s$/.test(last.text) ? ' '+delta : delta;
       last.end = Math.max(last.end,b ?? last.end);
     } else {
       chunks.push({role, text:delta, start:a, end:b, order:serial++});
@@ -46,7 +55,7 @@ function createTranscriptTracker({gapMs = 1800} = {}) {
 // A label is required on each NEW main question; follow-ups are not numbered.
 // Only explicitly observed sequential numbers change the count, so ordinary
 // question marks or interviewer clarifications cannot inflate it.
-const MAIN_LABEL = /(?:^|[\n.!?]\s+)(?:основной\s+)?вопрос\s*№?\s*(\d{1,2})(?:\s*из\s*\d{1,2})?\s*[:.?!—-]/giu;
+const MAIN_LABEL = /(?:^|[\s,.!?;:])(?:основной\s+)?вопрос\s*№?\s*(\d{1,2})(?:\s*из\s*\d{1,2})?\s*[:.?!—-]/giu;
 function createQuestionTracker(total) {
   const target=[5,8,10].includes(total)?total:8;
   let confirmed=0;

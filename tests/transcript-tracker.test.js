@@ -11,13 +11,14 @@ test('interleaved interviewer and candidate deltas never steal another speaker f
   t.append('interviewer','продолжайте.',1800,2200,'b2');
   t.append('candidate','беру строки по одной.',2200,2600,'a3');
   const turns=t.turns();
-  assert.equal(turns.length,2);
-  const candidate=turns.find(x=>x.role==='candidate');
-  const interviewer=turns.find(x=>x.role==='interviewer');
-  assert.equal(candidate.text,'Когда я читаю файл, беру строки по одной.');
-  assert.equal(interviewer.text,'Да, продолжайте.');
-  assert.equal(candidate.start,1000);
-  assert.equal(candidate.end,2600);
+  // Each speaker's words must be preserved even when interruptions force
+  // separate segments. Never join two answers through another speaker.
+  assert.equal(turns.filter(x=>x.role==='candidate').map(x=>x.text).join(''),
+    'Когда я читаю файл, беру строки по одной.');
+  assert.equal(turns.filter(x=>x.role==='interviewer').map(x=>x.text).join(''),
+    'Да, продолжайте.');
+  assert.ok(turns.filter(x=>x.role==='candidate').length>1);
+  assert.equal(turns[0].start,1000);
 });
 
 test('preserves raw fragments, repeated words, and ignores exact duplicate server event IDs',()=>{
@@ -85,4 +86,21 @@ test('numbered question split by a >1.8s speaker pause is still counted',()=>{
   assert.equal(turns.length,2);
   const q=createQuestionTracker(5);
   assert.equal(q.inspect(turns).confirmed,1);
+});
+
+test('two answers separated by a question are never concatenated',()=>{
+  const t=createTranscriptTracker();
+  t.append('candidate','Первый ответ.',0,200,'a1');
+  t.append('interviewer','Почему?',210,280,'b1');
+  t.append('candidate','Второй ответ.',300,600,'a2');
+  const answers=t.turns().filter(x=>x.role==='candidate').map(x=>x.text);
+  assert.deepEqual(answers,['Первый ответ.','Второй ответ.']);
+});
+test('detects main questions after conversational introductions',()=>{
+  const tracker=createQuestionTracker(5);
+  const r=tracker.inspect([{role:'interviewer',
+    text:'Ну что, вопрос 1: начнём с Python?'}]);
+  assert.equal(r.confirmed,1);
+  assert.equal(tracker.inspect([{role:'interviewer',
+    text:'А ещё, вопрос 2: SQL?'}]).confirmed,2);
 });

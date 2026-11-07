@@ -13,6 +13,7 @@ let savedKeyReady=false;
 let showTranscript=false, clockInterval=null, callStartedAt=0;
 let archiveId=null, lastReportId=null;
 let draftDirty=false, draftSaving=false, draftDrain=Promise.resolve();
+let draftWriteTimer=null;
 let readyGate=null, liveActive=false, liveSessionId=null, liveDeadlineAt=0;
 let firstOutputSeen=false, greetingAttempts=0, greetingEventId=null, openingTimer=null;
 let audioPlaybackStarted=false, audioPlaybackError=false, lastSessionClose=null;
@@ -103,7 +104,7 @@ function refreshTranscript(){
     const name=document.createElement('b');
     const line=document.createElement('p');
     name.textContent=turn.role==='candidate'?'Ты':'Александр';
-    line.textContent=turn.text.trim().slice(0,1500);
+    line.textContent=turn.text.trim();
     item.append(name,line);
     list.append(item);
   }
@@ -113,7 +114,7 @@ function toggleTranscript(open){
   showTranscript=Boolean(open);
   $('transcriptWrap').hidden=!showTranscript;
   $('toggleTranscript').setAttribute('aria-expanded',String(showTranscript));
-  $('toggleTranscript').textContent=showTranscript?'Скрыть расшифровку ↑':'Показать расшифровку ↗';
+  $('toggleTranscript').textContent=showTranscript?'Скрыть последние реплики ↑':'Показать последние 30 реплик ↗';
   if(showTranscript)refreshTranscript();
 }
 
@@ -142,7 +143,20 @@ function persistDraft() {
   });
   return draftDrain;
 }
-function scheduleDraft() {void persistDraft().catch(()=>{});}
+// Coalesce high-frequency word deltas to avoid rewriting an ever-growing
+// JSON transcript for every word. Finalization always forces a synchronous
+// flush through the IPC queue before ending the interview.
+function scheduleDraft() {
+  if(draftWriteTimer)return;
+  draftWriteTimer=setTimeout(()=>{
+    draftWriteTimer=null;
+    void persistDraft().catch(()=>{});
+  },200);
+}
+async function flushDraft(){
+  if(draftWriteTimer){clearTimeout(draftWriteTimer);draftWriteTimer=null;}
+  await persistDraft();
+}
 async function refreshArchiveHistory() {
   const list=$('archiveHistory');
   list.replaceChildren();
@@ -234,6 +248,7 @@ function cleanup() {
   pc=null;
   sound.srcObject=null;
   stopClock();
+  if(draftWriteTimer){clearTimeout(draftWriteTimer);draftWriteTimer=null;}
   readyGate?.dispose();readyGate=null;
   clearOpeningTimer();
   liveActive=false;liveSessionId=null;liveDeadlineAt=0;
@@ -245,6 +260,7 @@ function cleanup() {
   $('muteLabel').textContent='Выключить микрофон';
   $('mute').disabled=false;
   $('stop').disabled=false;
+  $('stop').textContent='Завершить и оценить';
   $('start').disabled=false;
 }
 function send(type,payload={}) {
@@ -276,6 +292,7 @@ function appendTranscript(role,evt) {
     }
     if(progress.complete&&!limitNoticeSent){
       limitNoticeSent=true;
+      $('stop').textContent='Завершить после ответа';
       send('session.instructions.append',{
         event_id:'questions-complete-'+Date.now(),delegation_id:null,
         content:'Основных вопросов уже '+requested+' из '+requested+
@@ -381,6 +398,7 @@ async function begin() {
   limitNoticeSent=false;numberingWarningSent=false;extraQuestionStopped=false;
   archiveId=null;lastReportId=null;
   draftDirty=false;draftSaving=false;draftDrain=Promise.resolve();
+  if(draftWriteTimer){clearTimeout(draftWriteTimer);draftWriteTimer=null;}
   firstOutputSeen=false;greetingAttempts=0;greetingEventId=null;
   audioPlaybackStarted=false;audioPlaybackError=false;lastSessionClose=null;
   usageSeconds=0;fiveMinuteWarningShown=false;liveSessionId=null;liveDeadlineAt=0;
@@ -517,7 +535,7 @@ async function stop(reason='manual') {
     $('archiveNotice').hidden=false;
   }
   try{
-    await persistDraft();
+    await flushDraft();
     if(archiveId)await window.desktop.endInterview({
       archiveId,turns:transcript.map(t=>({...t})),endedAt
     });
@@ -688,7 +706,12 @@ $('mute').addEventListener('click',()=>{
   $('muteLabel').textContent=muted?'Включить микрофон':'Выключить микрофон';
   status(muted?'Микрофон выключен':'Слушаю');
 });
-$('retry').addEventListener('click',()=>{void grade();});
+$('retry').addEventListener('click',()=>{
+  // After a network timeout the previous Responses request might have been
+  // charged already. Require informed consent before repeating it.
+  if(window.confirm('Повторная оценка может вызвать ещё один платный запрос OpenAI. Продолжить?'))
+    void grade();
+});
 $('reset').addEventListener('click',reset);
 $('again').addEventListener('click',reset);
 if(window.desktop?.onCloseRequest){
@@ -705,6 +728,11 @@ if(window.desktop?.onCloseRequest){
 if(window.desktop?.onUnconfirmedClose){
   window.desktop.onUnconfirmedClose(()=>{void refreshLiveStatus();});
 }
+if(window.desktop?.onGradeClosePending){
+  window.desktop.onGradeClosePending(()=>{
+    status('Окно закроется после сохранения результата оценки…');
+  });
+}
 if(window.desktop?.onWindowCloseRequest){
   window.desktop.onWindowCloseRequest(()=>{
     void (async()=>{
@@ -713,7 +741,7 @@ if(window.desktop?.onWindowCloseRequest){
         const endedAt=new Date().toISOString();
         await disconnectGracefully('app_quit');
         try{
-          await persistDraft();
+          await flushDraft();
           if(archiveId)await window.desktop.endInterview({
             archiveId,turns:transcript.map(t=>({...t})),endedAt
           });

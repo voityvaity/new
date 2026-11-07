@@ -151,6 +151,12 @@ function createInterviewArchive({draftDirectory, generatePdf}) {
       return {saved:true};
     });
   }
+  function getEvaluation(id) {
+    return enqueue(async () => {
+      const record=await read(id);
+      return record.evaluation || null;
+    });
+  }
   function storeEvaluation(id, evaluation) {
     return enqueue(async () => {
       const record = await read(id);
@@ -200,7 +206,7 @@ function createInterviewArchive({draftDirectory, generatePdf}) {
       return {pdfFile, jsonFile, directory:reportDirectory};
     });
   }
-  return {start, snapshot, end, storeEvaluation, list, exportReport};
+  return {start, snapshot, end, getEvaluation, storeEvaluation, list, exportReport};
 }
 
 module.exports = {createInterviewArchive, cleanTurns, escapeHtml, durationLabel, reportHtml, filenameFor, atomicWrite};

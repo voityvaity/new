@@ -83,7 +83,7 @@ function createLiveGuard({
     const time=now();
     const createdAt=Number.isFinite(startedAt)?Math.min(time,startedAt):time;
     const s={id,key,createdAt,deadlineAt:createdAt+limitMs,state:'open',
-      reason:null,deadlineTimer:null,graceTimer:null};
+      reason:null,deadlineTimer:null,graceTimer:null,fallbackAttempted:false};
     active=s;
     s.deadlineTimer=schedule(()=>{
       if(active===s)requestClose('time_limit');
@@ -103,12 +103,13 @@ function createLiveGuard({
     settle(snapshot());
     return snapshot();
   }
-  async function emergencyFallback(s) {
-    if(active!==s || s.state!=='closing')return;
-    // A successful SIP hangup response still does NOT confirm WebRTC finalization.
+  async function emergencyFallback(s, reason='terminal_event_missing') {
+    if(active!==s || s.fallbackAttempted)return;
+    s.fallbackAttempted=true; // At most once per session, even after transport loss.
+    // A successful SIP fallback is never evidence of WebRTC session.closed.
     try{await fallbackHangup(s.id,s.key);}
-    catch{/* Expected on WebRTC-only endpoints or during network outages. */}
-    if(active===s)markUnconfirmed('terminal_event_missing');
+    catch{/* Network or unsupported protocol; the outcome remains unconfirmed. */}
+    if(active===s && s.state!=='unconfirmed')markUnconfirmed(reason);
   }
   function requestClose(reason='manual') {
     if(!active)return snapshot();
@@ -137,8 +138,12 @@ function createLiveGuard({
   }
   function transportLost(sessionId) {
     if(!active || active.id!==sessionId)return snapshot();
-    // Closing a PeerConnection is not a terminal event from OpenAI.
-    return markUnconfirmed('transport_lost_without_session_closed');
+    const s=active;
+    // An interrupted transport cannot supply session.closed. Mark uncertainty
+    // immediately, but still attempt the emergency fallback once.
+    const state=markUnconfirmed('transport_lost_without_session_closed');
+    void emergencyFallback(s,'transport_lost_without_session_closed');
+    return state;
   }
   function acknowledgeUnknown() {
     if(!active || active.state!=='unconfirmed')return false;

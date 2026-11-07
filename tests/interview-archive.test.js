@@ -155,3 +155,15 @@ test('oversized transcript is rejected explicitly, never silently clipped',async
     }))),/Слишком много фрагментов/);
   });
 });
+
+test('stored evaluation can be reused without another paid model call',async()=>{
+  await withTemp(async root=>{
+    const archive=makeArchive(root);
+    const {id}=await archive.start(5);
+    assert.equal(await archive.getEvaluation(id),null);
+    await archive.end(id,turns);
+    await archive.storeEvaluation(id,evaluation);
+    const revived=makeArchive(root);
+    assert.deepEqual(await revived.getEvaluation(id),evaluation);
+  });
+});

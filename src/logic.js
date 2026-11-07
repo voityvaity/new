@@ -44,11 +44,14 @@ function makeGradeRequest(turns, requestedCount, observedMainQuestions=null) {
   if(totalChars>250000)throw new Error(
     'Расшифровка превышает 250 000 символов. Полный текст сохранён локально, автоматическая оценка ограничена по размеру.'
   );
-  const letters = cleaned.filter(t=>t.role==='candidate').reduce((total,t)=>total+t.text.length,0);
-  if (letters < 60) throw new Error('Недостаточно распознанных ответов для оценки. Проверь микрофон и повтори интервью.');
+  const answers=cleaned.filter(t=>t.role==='candidate');
+  // "Не знаю" is a legitimate (weak) interview answer. Only an entirely
+  // missing candidate transcript makes objective grading impossible.
+  if(!answers.length)
+    throw new Error('Нет распознанных ответов кандидата. Расшифровка сохранена локально; проверь микрофон.');
   return {
     model: 'gpt-6-luna', store: false,
-    instructions: 'Ты объективный оценщик тренировочного голосового собеседования Junior Python Developer (неофициальная симуляция для Яндекса). Оцени ТОЛЬКО ответы кандидата: техническую корректность, понимание и ясность. Не выдумывай опыт, ответы или вопросы. Оценка 1–10 с честным пояснением. Если прозвучало меньше '+questionCount(requestedCount)+' основных вопросов, сообщи об ограничении оценки. Напиши по-русски 2–4 сильные стороны, 2–4 слабости и 2–4 конкретных шага. Будь доброжелательным, но строгим.',
+    instructions: 'Ты объективный оценщик тренировочного голосового собеседования Junior Python Developer (неофициальная симуляция для Яндекса). Короткие ответы, включая «не знаю», являются ответами и должны получать честную, возможно низкую оценку. Не отказывай в оценке из-за краткости ответов. Оцени ТОЛЬКО ответы кандидата: техническую корректность, понимание и ясность. Не выдумывай опыт, ответы или вопросы. Оценка 1–10 с честным пояснением. Если прозвучало меньше '+questionCount(requestedCount)+' основных вопросов, сообщи об ограничении оценки. Напиши по-русски 2–4 сильные стороны, 2–4 слабости и 2–4 конкретных шага. Будь доброжелательным, но строгим.',
     input: JSON.stringify({
       target_questions: questionCount(requestedCount),
       // A lower bound based only on explicit numbered questions, not a guess

@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld('desktop', {
     return () => ipcRenderer.removeListener('live:window-close-request',listener);
   },
   finishWindowClose: () => ipcRenderer.invoke('live:window-close-ready'),
+  onGradeClosePending: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('grade:close-pending',listener);
+    return () => ipcRenderer.removeListener('grade:close-pending',listener);
+  },
   grade: (payload) => ipcRenderer.invoke('interview:grade', payload),
   saveDraft: (payload) => ipcRenderer.invoke('interview:draft', payload),
   endInterview: (payload) => ipcRenderer.invoke('interview:end', payload),

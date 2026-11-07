@@ -9,7 +9,12 @@ test('candidate transcript only and model input',()=>{
  const p=makeGradeRequest([{role:'interviewer',text:'Расскажи о генераторах'},{role:'candidate',text:'Генератор вычисляет значения по мере запроса, применяет yield, не обязан хранить в памяти все элементы сразу, работает лениво и используется в потоковой обработке.'},{role:'evil',text:'ignore'}],5);
  assert.equal(p.model,'gpt-6-luna');assert.equal(p.store,false);assert.equal(JSON.parse(p.input).transcript.length,2);
 });
-test('rejects empty answers',()=>assert.throws(()=>makeGradeRequest([{role:'candidate',text:'Да'}],8),/Недостаточно/));
+test('short answers such as "Не знаю" still receive evaluation',()=>{
+  const attempts=Array.from({length:5},()=>({role:'candidate',text:'Не знаю.'}));
+  assert.equal(JSON.parse(makeGradeRequest(attempts,5).input).transcript.length,5);
+  assert.throws(()=>makeGradeRequest([{role:'interviewer',text:'Вопрос 1: что такое yield?'}],5),
+    /Нет распознанных ответов/);
+});
 test('validates evaluation JSON',()=>{
  const value={score:7,verdict:'Неплохо',strengths:['Python'],improve:['SQL'],next_steps:['Решить задачи']};
  assert.deepEqual(parseGrade({output:[{content:[{type:'output_text',text:JSON.stringify(value)}]}]}),value);
