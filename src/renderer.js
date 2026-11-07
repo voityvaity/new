@@ -13,13 +13,25 @@ let savedKeyReady=false;
 let showTranscript=false, clockInterval=null, callStartedAt=0;
 let archiveId=null, lastReportId=null;
 let draftDirty=false, draftSaving=false, draftDrain=Promise.resolve();
+let readyGate=null, liveActive=false, liveSessionId=null, liveDeadlineAt=0;
+let firstOutputSeen=false, greetingAttempts=0, greetingEventId=null, openingTimer=null;
+let usageSeconds=0, fiveMinuteWarningShown=false, connectionAttempt=0;
+const OPENING_INSTRUCTION=window.LivePrompts.OPENING_PROMPT;
 
 function refreshClock(){
   if(!callStartedAt)return;
   const seconds=Math.floor((Date.now()-callStartedAt)/1000);
-  const mm=String(Math.floor(seconds/60)).padStart(2,'0');
-  const ss=String(seconds%60).padStart(2,'0');
-  $('timer').textContent=mm+':'+ss;
+  $('timer').textContent=window.LiveLifecycle.formatClock(seconds*1000);
+  if(liveDeadlineAt){
+    const remaining=Math.max(0,liveDeadlineAt-Date.now());
+    $('remainingTime').textContent='Осталось '+window.LiveLifecycle.formatClock(remaining);
+    $('remainingTime').title='По данным GPT-Live использовано '+Math.floor(usageSeconds)+
+      ' сек. Расходы делегированной модели учитываются отдельно.';
+    if(remaining<=window.LiveLifecycle.WARNING_REMAINING_MS && !fiveMinuteWarningShown && !finishing){
+      fiveMinuteWarningShown=true;
+      status('До автоматического завершения интервью осталось 5 минут.');
+    }
+  }
 }
 function beginClock(){
   if(clockInterval)clearInterval(clockInterval);
@@ -29,6 +41,55 @@ function beginClock(){
 function stopClock(){
   if(clockInterval)clearInterval(clockInterval);
   clockInterval=null;callStartedAt=0;
+}
+function clearOpeningTimer(){
+  if(openingTimer)clearTimeout(openingTimer);
+  openingTimer=null;
+}
+function requestOpening(){
+  if(!liveActive || finishing || firstOutputSeen || greetingAttempts>=2)return false;
+  greetingAttempts++;
+  greetingEventId='opening-'+Date.now()+'-'+greetingAttempts;
+  const sent=send('session.commentary.append',{
+    event_id:greetingEventId,delegation_id:null,content:OPENING_INSTRUCTION
+  });
+  if(!sent){
+    greetingAttempts--;
+    $('repeatFirstQuestion').hidden=false;
+    status('Не удалось запросить первый вопрос. Проверь соединение.',true);
+    return false;
+  }
+  greeted=true;
+  $('repeatFirstQuestion').hidden=true;
+  clearOpeningTimer();
+  if(greetingAttempts<2)openingTimer=setTimeout(()=>{
+    if(!firstOutputSeen&&liveActive&&!finishing){
+      $('repeatFirstQuestion').hidden=false;
+      status('Первый вопрос не появился. Можно запросить его повторно.');
+    }
+  },window.LiveLifecycle.FIRST_QUESTION_RETRY_MS);
+  return true;
+}
+function activateLive(){
+  if(liveActive || finishing || grading)return;
+  liveActive=true;
+  phase('active');
+  beginClock();
+  $('key').value='';
+  $('excerpt').textContent='Слушай вопрос и отвечай голосом. Можно попросить повторить.';
+  status(firstOutputSeen?'Интервью идёт · слушаю'
+    :'Соединение готово · ожидаю первый вопрос');
+  if(!firstOutputSeen)requestOpening();
+}
+async function abortStartup(message){
+  if(liveActive || finishing || grading)return;
+  connectionAttempt++;
+  readyGate?.dispose();readyGate=null;
+  cleanup();
+  phase('idle');
+  status(message,true);
+  try{await window.desktop?.hangupLive({aborted:true});}
+  catch{status(message+' Не удалось подтвердить завершение сессии.',true);}
 }
 function refreshTranscript(){
   const list=$('transcriptList');
@@ -121,15 +182,17 @@ function status(message,error=false) {
 function speech(isSpeaking){$('portrait').classList.toggle('speaking',isSpeaking);$('soundBars').classList.toggle('speaking',isSpeaking);}
 function phase(mode) {
   const idle=mode==='idle', active=mode==='active', fault=mode==='fault';
-  $('setup').hidden=!idle;
+  const connecting=mode==='connecting';
+  $('setup').hidden=!(idle||connecting);
   $('conversation').hidden=!active;
   $('faultInfo').hidden=!fault;
   $('timer').hidden=!active;
-  $('topStage').textContent=idle?'Подготовка':active?'Интервью идёт':fault?'Завершение':'Результат';
+  $('topStage').textContent=idle?'Подготовка':connecting?'Подключение':active?'Интервью идёт':fault?'Завершение':'Результат';
   $('plannedCount').textContent=questionTracker.confirmed
     ? 'Основных вопросов: '+questionTracker.confirmed+' из '+requested
     : 'План: '+requested+' основных вопросов';
   $('start').hidden=!idle;
+  $('cancelConnecting').hidden=!connecting;
   $('mute').hidden=!active;
   $('stop').hidden=!active;
   $('retry').hidden=!fault;
@@ -147,7 +210,11 @@ function cleanup() {
   pc=null;
   sound.srcObject=null;
   stopClock();
-  // Drafts are already written continuously; a graceful stop awaits the final write.
+  readyGate?.dispose();readyGate=null;
+  clearOpeningTimer();
+  liveActive=false;liveSessionId=null;liveDeadlineAt=0;
+  $('repeatFirstQuestion').hidden=true;
+  // Drafts are written continuously; a graceful stop awaits the final write.
   started=false;muted=false;greeted=false;
   speech(false);
   $('muteLabel').textContent='Выключить микрофон';
@@ -157,8 +224,8 @@ function cleanup() {
 }
 function send(type,payload={}) {
   if(channel?.readyState!=='open')return false;
-  channel.send(JSON.stringify({type,...payload}));
-  return true;
+  try{channel.send(JSON.stringify({type,...payload}));return true;}
+  catch{return false;}
 }
 function appendTranscript(role,evt) {
   if(!transcriptTracker.append(role,evt.delta,evt.start_ms,evt.end_ms,evt.event_id))return;
@@ -204,34 +271,56 @@ function onEvent(evt) {
   switch(evt.type) {
     case 'session.started':
       started=true;
-      status('Интервью идёт · слушаю');
-      if(!greeted) {
-        greeted=true;
-        send('session.instructions.append',{
-          event_id:'start-'+Date.now(),delegation_id:null,
-          content:'Начни: кратко представься, затем скажи «Вопрос 1:» и задай первый основной вопрос Junior Python. Дождись ответа. Каждый новый основной вопрос начинай «Вопрос N:». Уточнения не нумеруй.'
-        });
-      }
+      readyGate?.markStarted();
+      break;
+    case 'session.usage.updated':
+      usageSeconds=window.LiveLifecycle.cumulativeUsage(usageSeconds,evt);
+      if(liveActive)refreshClock();
+      break;
+    case 'session.commentary.appended':
+      // Acknowledgment is not evidence of audible playback.
       break;
     case 'session.input_transcript.delta':
       appendTranscript('candidate',evt);
-      status('Слушаю твой ответ');speech(false);
+      if(liveActive)status('Слушаю твой ответ');
+      speech(false);
       break;
     case 'session.output_transcript.delta':
+      if(typeof evt.delta==='string' && evt.delta.length && !firstOutputSeen){
+        firstOutputSeen=true;
+        clearOpeningTimer();
+        $('repeatFirstQuestion').hidden=true;
+      }
       appendTranscript('interviewer',evt);
-      if(!finishing){status('Александр говорит');speech(true);}
+      if(!finishing){if(liveActive)status('Александр говорит');speech(true);}
       break;
     case 'session.closed':
+      usageSeconds=window.LiveLifecycle.cumulativeUsage(usageSeconds,evt);
       if(closeResolve){closeResolve();closeResolve=null;}
       else if(!finishing){
-        cleanup();phase('fault');
-        status('Голосовое соединение закрыто. Начни интервью заново.',true);
+        if(liveActive && liveDeadlineAt && Date.now()>=liveDeadlineAt-2000){
+          void stop('time_limit');
+        }else if(!liveActive){
+          void abortStartup('Голосовая сессия закрылась до начала интервью.');
+        }else{
+          void window.desktop?.hangupLive().catch(()=>{});
+          cleanup();phase('fault');
+          status('Голосовое соединение закрылось. Можно попробовать получить оценку.',true);
+        }
       }
       break;
     case 'session.error':
-    case 'error':
-      status(evt.error?.message||evt.message||'Ошибка голосового соединения.',true);
+    case 'error': {
+      const message=evt.error?.message||evt.message||'Ошибка голосового соединения.';
+      const clientId=evt.error?.client_event_id||evt.client_event_id;
+      if(clientId && clientId===greetingEventId && !firstOutputSeen && greetingAttempts<2){
+        clearOpeningTimer();
+        $('repeatFirstQuestion').hidden=false;
+      }
+      if(!liveActive)void abortStartup(message);
+      else status(message,true);
       break;
+    }
   }
 }
 function waitIce(peer) {
@@ -250,6 +339,7 @@ async function begin() {
   if(!window.desktop){status('Запусти программу через установщик Windows.',true);return;}
   const key=$('key').value.trim();
   if(!key.startsWith('sk-')){status('Нужен OpenAI API-ключ, начинающийся с sk-.',true);return;}
+  const attempt=++connectionAttempt;
   $('start').disabled=true;
   $('error').hidden=true;
   transcript=[];requested=Number($('count').value);
@@ -258,50 +348,85 @@ async function begin() {
   limitNoticeSent=false;numberingWarningSent=false;extraQuestionStopped=false;
   archiveId=null;lastReportId=null;
   draftDirty=false;draftSaving=false;draftDrain=Promise.resolve();
+  firstOutputSeen=false;greetingAttempts=0;greetingEventId=null;
+  usageSeconds=0;fiveMinuteWarningShown=false;liveSessionId=null;liveDeadlineAt=0;
   $('archiveNotice').hidden=true;
   $('archiveNotice').textContent='';
+  $('repeatFirstQuestion').hidden=true;
+  $('remainingTime').textContent='Лимит 30 минут';
   toggleTranscript(false);
   $('liveSpeaker').textContent='В ожидании первого вопроса';
   $('liveText').textContent='Сейчас Александр начнёт интервью…';
-  started=false;finishing=false;greeted=false;
+  started=false;finishing=false;greeted=false;liveActive=false;
+  phase('connecting');
   status('Подключаюсь к GPT-Live-1…');
+  readyGate=window.LiveLifecycle.createReadyGate({
+    onReady:()=>{if(attempt===connectionAttempt)activateLive();},
+    onTimeout:()=>{if(attempt===connectionAttempt)void abortStartup('GPT-Live не подтвердил готовность соединения за 20 секунд.');}
+  });
   try {
-    pc=new RTCPeerConnection();
+    const peer=new RTCPeerConnection();
+    pc=peer;
     pc.addEventListener('track',({track})=>{
+      if(attempt!==connectionAttempt)return;
       sound.srcObject=new MediaStream([track]);
       sound.play().catch(()=>status('Не удалось воспроизвести голос. Проверь звук Windows.',true));
     });
     pc.addEventListener('connectionstatechange',()=>{
-      if(pc&&pc.connectionState==='failed'&&!finishing)
-        status('Соединение прервано. Заверши интервью для оценки.',true);
+      if(attempt!==connectionAttempt||!pc||pc!==peer||finishing)return;
+      if(pc.connectionState==='failed'){
+        if(!liveActive)void abortStartup('Не удалось установить голосовое соединение.');
+        else status('Соединение прервано. Заверши интервью для оценки.',true);
+      }
     });
-    microphone=await navigator.mediaDevices.getUserMedia({
+    const stream=await navigator.mediaDevices.getUserMedia({
       audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}
     });
-    microphone.getTracks().forEach(track=>pc.addTrack(track,microphone));
+    if(attempt!==connectionAttempt){
+      stream.getTracks().forEach(t=>t.stop());
+      return;
+    }
+    microphone=stream;
+    stream.getTracks().forEach(track=>pc.addTrack(track,stream));
     channel=pc.createDataChannel('oai-events');
+    channel.addEventListener('open',()=>{
+      if(attempt===connectionAttempt)readyGate?.markChannel();
+    });
     channel.addEventListener('message',({data})=>{
-      try{onEvent(JSON.parse(data));}catch{status('Получено некорректное событие голосового API.',true);}
+      if(attempt!==connectionAttempt)return;
+      try{onEvent(JSON.parse(data));}
+      catch{status('Получено некорректное событие голосового API.',true);}
     });
     const offer=await pc.createOffer();
     await pc.setLocalDescription(offer);
     await waitIce(pc);
-    const answer=await window.desktop.create({key,sdp:pc.localDescription.sdp,count:requested,rememberKey:$('rememberKey').checked});
+    if(attempt!==connectionAttempt)return;
+    const answer=await window.desktop.create({
+      key,sdp:pc.localDescription.sdp,count:requested,
+      rememberKey:$('rememberKey').checked
+    });
+    if(attempt!==connectionAttempt){
+      await window.desktop.hangupLive({aborted:true}).catch(()=>{});
+      return;
+    }
     archiveId=answer.archiveId||null;
-    if(answer.saveWarning) status(answer.saveWarning,true);
+    liveSessionId=answer.sessionId||null;
+    liveDeadlineAt=Date.parse(answer.deadlineAt)||0;
+    if(answer.saveWarning)status(answer.saveWarning,true);
     if(answer.archiveWarning){
       $('archiveNotice').textContent=answer.archiveWarning;
       $('archiveNotice').hidden=false;
     }
-    $('key').value='';
+    readyGate.arm();
     await pc.setRemoteDescription({type:'answer',sdp:answer.sdp});
-    phase('active');
-    beginClock();
-    $('excerpt').textContent='Слушай вопрос и отвечай голосом. Можно попросить повторить.';
-    status('Подключено. Начинаем интервью…');
-  } catch(error) {
-    cleanup();phase('idle');
-    status(error instanceof Error?error.message:String(error),true);
+    if(attempt!==connectionAttempt)return;
+    readyGate?.markRemote();
+    if(channel?.readyState==='open')readyGate?.markChannel();
+    // No "Connected" label until session.started AND the transport are ready.
+    if(!liveActive)status('Ожидаю подтверждение готовности GPT-Live…');
+  }catch(error){
+    if(attempt===connectionAttempt)
+      await abortStartup(error instanceof Error?error.message:String(error));
   }
 }
 function disconnectGracefully(){
@@ -313,11 +438,13 @@ function disconnectGracefully(){
     if(!send('session.close')){clearTimeout(t);closeResolve=null;resolve();}
   });
 }
-async function stop() {
+async function stop(reason='manual') {
   if(finishing||grading)return;
   finishing=true;
   $('stop').disabled=true;$('mute').disabled=true;
-  status('Завершаю собеседование…');
+  status(reason==='time_limit'
+    ? 'Лимит 30 минут достигнут. Завершаю интервью и сохраняю ответы…'
+    : 'Завершаю собеседование…');
   const endedAt=new Date().toISOString(); // Before network shutdown and evaluation.
   await disconnectGracefully();
   try{
@@ -376,6 +503,8 @@ function reset() {
   limitNoticeSent=false;numberingWarningSent=false;extraQuestionStopped=false;
   archiveId=null;lastReportId=null;
   finishing=false;grading=false;closeResolve=null;
+  firstOutputSeen=false;greetingAttempts=0;greetingEventId=null;
+  usageSeconds=0;fiveMinuteWarningShown=false;
   if(savedKeyReady && $('rememberKey').checked)void window.desktop.getPrefs().then(p=>{$('key').value=p.key||'';}).catch(()=>{});
   toggleTranscript(false);
   $('archiveNotice').hidden=true;
@@ -455,6 +584,13 @@ $('count').addEventListener('change',()=>{
   void window.desktop?.savePrefs({count:Number($('count').value)}).catch(()=>{});
 });
 $('start').addEventListener('click',begin);
+$('cancelConnecting').addEventListener('click',()=>{
+  void abortStartup('Подключение отменено. Голосовая сессия закрыта.');
+});
+$('repeatFirstQuestion').addEventListener('click',()=>{
+  if(!firstOutputSeen && requestOpening())
+    status('Повторно запросил первый вопрос · слушаю');
+});
 $('stop').addEventListener('click',()=>{void stop();});
 $('mute').addEventListener('click',()=>{
   if(!microphone)return;
@@ -467,6 +603,13 @@ $('mute').addEventListener('click',()=>{
 $('retry').addEventListener('click',()=>{void grade();});
 $('reset').addEventListener('click',reset);
 $('again').addEventListener('click',reset);
+if(window.desktop?.onTimeLimit){
+  window.desktop.onTimeLimit(payload=>{
+    if(!liveSessionId || payload?.sessionId!==liveSessionId || finishing || grading)return;
+    if(liveActive)void stop('time_limit');
+    else void abortStartup('Лимит времени голосовой сессии достигнут до начала интервью.');
+  });
+}
 window.addEventListener('beforeunload',()=>{
   if(channel?.readyState==='open')send('session.close');
   cleanup();

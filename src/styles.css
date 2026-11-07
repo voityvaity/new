@@ -200,3 +200,8 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline: 3px sol
   .sound-bars.speaking i { animation: none; }
   .button { transition: none; }
 }
+
+/* Session lifecycle: one compact countdown and optional recovery action. */
+#remainingTime {font-variant-numeric:tabular-nums;color:var(--muted);}
+#repeatFirstQuestion {margin-top:12px;}
+#cancelConnecting {width:100%;}

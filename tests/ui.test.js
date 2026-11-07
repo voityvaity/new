@@ -82,3 +82,32 @@ test('live transcript tracker loads before renderer and question counter is rese
  assert.match(js,/progress\.overLimit/);
  assert.match(js,/observedMainQuestions:questionTracker\.confirmed/);
 });
+
+test('connect phase waits for session.started, SDP and data channel',()=>{
+  for(const id of ['cancelConnecting','remainingTime','repeatFirstQuestion'])
+    assert.ok(html.includes('id="'+id+'"'), 'Missing control '+id);
+  const scriptOrder=[
+    html.indexOf('src="live-lifecycle.js"'),
+    html.indexOf('src="live-prompts.js"'),
+    html.indexOf('src="renderer.js"')
+  ];
+  assert.ok(scriptOrder[0]>0&&scriptOrder[1]>scriptOrder[0]&&scriptOrder[2]>scriptOrder[1]);
+  assert.ok(js.includes("phase('connecting')"));
+  assert.ok(js.includes('readyGate?.markStarted()'));
+  assert.ok(js.includes('readyGate.arm()'));
+  assert.ok(js.includes('readyGate?.markRemote()'));
+  assert.ok(js.includes('readyGate?.markChannel()'));
+  assert.ok(js.includes('session.commentary.append'));
+  assert.ok(js.includes('window.LivePrompts.OPENING_PROMPT'));
+  assert.ok(!js.includes("status('Подключено. Начинаем интервью"));
+});
+test('main-process Live cap and cumulative usage guard are wired',()=>{
+  const main=fs.readFileSync(path.join(base,'main.js'),'utf8');
+  assert.ok(main.includes('createLiveGuard('));
+  assert.ok(main.includes("+'/hangup'"));
+  assert.ok(main.includes("mainWindow.webContents.send('live:time-limit'"));
+  assert.ok(js.includes('window.desktop?.onTimeLimit'));
+  assert.ok(js.includes("stop('time_limit')"));
+  assert.ok(html.includes('Лимит 30 минут'));
+  assert.ok(js.includes('session.usage.updated'));
+});

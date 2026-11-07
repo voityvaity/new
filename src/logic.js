@@ -1,4 +1,5 @@
 'use strict';
+const {OPENING_PROMPT} = require('./live-prompts');
 const COUNTS = [5, 8, 10];
 
 function questionCount(value) {
@@ -19,6 +20,7 @@ function makeSession(requestedCount) {
   ].join('\n');
   return {
     model: 'gpt-live-1', store: false, instructions,
+    input: [{type:'message',role:'developer',content:[{type:'input_text',text:OPENING_PROMPT}]}],
     audio: { output: { voice: 'marin' } },
     delegation: {
       type: 'responses',

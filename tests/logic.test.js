@@ -31,3 +31,14 @@ test('main question protocol is numbered; follow-ups remain unnumbered',()=>{
    {role:'candidate',text:'Использую yield в генераторах для ленивого перебора большого файла, чтобы загружать и обрабатывать строки по одной, не собирать весь текст сразу.'}
  ],8,999).input).observed_numbered_main_questions,null);
 });
+
+test('GPT-Live opening instructions are seeded and reused for commentary',()=>{
+  const {OPENING_PROMPT}=require('../src/live-prompts');
+  const config=makeSession(8);
+  assert.equal(config.input.length,1);
+  assert.equal(config.input[0].type,'message');
+  assert.equal(config.input[0].role,'developer');
+  assert.deepEqual(config.input[0].content,[{type:'input_text',text:OPENING_PROMPT}]);
+  assert.match(OPENING_PROMPT,/Вопрос 1:/);
+  assert.match(OPENING_PROMPT,/дождись ответа/);
+});

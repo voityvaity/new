@@ -68,6 +68,7 @@
               <option value="8" selected>8 вопросов · стандартное</option>
               <option value="10">10 вопросов · полное</option>
             </select>
+            <p class="field-helper">Лимит 30 минут · платная голосовая сессия завершится автоматически.</p>
             <div class="archive-options">
               <div class="archive-title">Автоматическое сохранение интервью</div>
               <p class="archive-help">После оценки сохраняем PDF в указанную папку. Черновик расшифровки записывается по ходу разговора.</p>
@@ -98,12 +99,13 @@
           <p class="intro">Слушай вопрос и отвечай в своём темпе. Можно попросить повторить.</p>
           <div class="session-details">
             <span class="sound-bars" id="soundBars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-            <div><strong id="liveSpeaker">В ожидании первого вопроса</strong><span id="plannedCount">8 основных вопросов</span></div>
+            <div><strong id="liveSpeaker">В ожидании первого вопроса</strong><span id="plannedCount">8 основных вопросов</span><span id="remainingTime">Осталось 30:00</span></div>
           </div>
           <div class="utterance" aria-live="off">
             <div class="utterance-label">Последняя реплика</div>
             <p id="liveText">Сейчас Александр начнёт интервью…</p>
           </div>
+          <button type="button" id="repeatFirstQuestion" class="archive-button" hidden>Повторить первый вопрос</button>
           <button id="toggleTranscript" class="text-button" type="button" aria-expanded="false">Показать расшифровку <span aria-hidden="true">↗</span></button>
           <div id="transcriptWrap" class="transcript-panel" hidden>
             <ol id="transcriptList" aria-label="Распознанные реплики"></ol>
@@ -121,6 +123,7 @@
             <svg viewBox="0 0 24 24" width="21" height="21" fill="none" aria-hidden="true"><path d="m8 5 11 7-11 7V5Z" fill="currentColor"/></svg>
             Начать интервью
           </button>
+          <button id="cancelConnecting" class="button button-soft" type="button" hidden>Отменить подключение</button>
           <button id="mute" class="button button-soft" type="button" hidden>
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
             <span id="muteLabel">Выключить микрофон</span>
@@ -149,6 +152,8 @@
   </main>
 </div>
 <script src="transcript-tracker.js"></script>
+<script src="live-lifecycle.js"></script>
+<script src="live-prompts.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>
