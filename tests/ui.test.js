@@ -3,6 +3,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const crypto=require('node:crypto');
 const base=path.join(__dirname,'../src');
 const html=fs.readFileSync(path.join(base,'index.html'),'utf8');
 const js=fs.readFileSync(path.join(base,'renderer.js'),'utf8');
@@ -27,7 +28,7 @@ test('transcript uses text nodes, never HTML injection',()=>{
 });
 test('desktop portrait and responsive motion settings',()=>{
   assert.match(html,/src="\.\.\/assets\/interviewer\.webp"/);
-  assert.match(css,/@media\(max-width:740px\)/);
+  assert.match(css,/@media\(max-width: 760px\)/);
   assert.match(css, /prefers-reduced-motion/);
 });
 test('explicit API key visibility control and no browser storage',()=>{
@@ -47,4 +48,24 @@ test('archive folder, JSON option and saved-report feedback are wired into UI',(
   for(const id of ['archiveHistory','refreshArchiveHistory','retryReport'])
     assert.match(html,new RegExp('\\bid="'+id+'"'));
   assert.match(js,/result\.archive\?\.pdfFile/);
+});
+
+test('uses exact approved iOS QuickCue AppIcon, not invented JM branding',()=>{
+  const icon=fs.readFileSync(path.join(__dirname,'../assets/quickcue-app-icon.png'));
+  assert.equal(icon.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+  assert.equal(icon.readUInt32BE(16),1024);
+  assert.equal(icon.readUInt32BE(20),1024);
+  const gitBlob=crypto.createHash('sha1')
+    .update('blob '+icon.length+'\0').update(icon).digest('hex');
+  assert.equal(gitBlob,'5de25e3c4c0bf5aa6fdc0bee1afa2c53f233b8e6');
+  assert.match(html,/class="brand-icon" src="\.\.\/assets\/quickcue-app-icon\.png"/);
+  assert.doesNotMatch(html,/class="brand-mark"|JM<span/);
+});
+test('desktop design follows QuickCue semantic neutral/blue system palette',()=>{
+  assert.match(css,/--accent:\s*#007aff/);
+  assert.match(css,/--accent:\s*#0a84ff/);
+  assert.match(css,/--bg:\s*#f2f2f7/);
+  assert.match(css,/prefers-color-scheme:\s*dark/);
+  assert.match(css,/--surface:\s*#ffffff/);
+  assert.doesNotMatch(css,/avatar-decoration|radial-gradient/);
 });

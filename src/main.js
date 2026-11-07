@@ -34,6 +34,7 @@ function createWindow() {
   mainWindow=new BrowserWindow({
     width:1080,height:820,minWidth:730,minHeight:640,backgroundColor:'#0b1020',
     title:'Python Junior Mock',
+    icon:path.join(__dirname,'../assets/quickcue-app-icon.png'),
     webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}
   });
   mainWindow.removeMenu();

@@ -11,8 +11,8 @@
 <div class="app-shell">
   <header class="app-header">
     <div class="brand">
-      <div class="brand-mark" aria-hidden="true">JM<span>.</span></div>
-      <div class="brand-name">Junior Mock <span>Подготовка к собеседованию</span></div>
+      <img class="brand-icon" src="../assets/quickcue-app-icon.png" alt="QuickCue">
+      <div class="brand-name">QuickCue <span>Python Junior Mock · подготовка к собеседованию</span></div>
     </div>
     <div class="header-right">
       <span class="header-role">Python Developer · Junior</span>
@@ -23,8 +23,8 @@
   <main class="interview-layout">
     <section class="stage" aria-label="Ваш виртуальный интервьюер">
       <div class="stage-top">
-        <span class="overline">ВАШ СОБЕСЕДНИК</span>
-        <span class="stage-company">Яндекс <span>·</span> тренировочное интервью</span>
+        <span class="overline">Ваш собеседник</span>
+        <span class="stage-company">Python Backend <span>·</span> тренировочное интервью</span>
       </div>
 
       <div class="photo-area">
@@ -36,8 +36,7 @@
             <h1>Александр</h1>
           </div>
         </div>
-        <div class="avatar-decoration avatar-decoration-one" aria-hidden="true"></div>
-        <div class="avatar-decoration avatar-decoration-two" aria-hidden="true"></div>
+        
       </div>
 
       <div class="stage-bottom">
@@ -52,7 +51,7 @@
     <aside class="workspace" aria-label="Управление собеседованием">
       <section id="panel" class="panel">
         <div id="setup">
-          <div class="eyebrow">НОВАЯ ТРЕНИРОВКА</div>
+          <div class="eyebrow">Новая тренировка</div>
           <h2>Потренируемся?</h2>
           <p class="intro">Как на настоящем интервью: знакомство, Python, технические вопросы и уточнения по твоим ответам.</p>
 
@@ -88,13 +87,13 @@
           </div>
           <div class="prep-note">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2 4.5 5v6c0 5 3.1 8.9 7.5 11 4.4-2.1 7.5-6 7.5-11V5L12 2Z" stroke="currentColor" stroke-width="1.6"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span>Это неофициальная симуляция собеседования в Яндекс. Для работы понадобится микрофон и доступ к платному OpenAI API.</span>
+            <span>Это неофициальная тренировка в формате технического интервью. Нужны микрофон и доступ к OpenAI API.</span>
           </div>
         </div>
 
         <div id="conversation" hidden>
           <p id="archiveNotice" class="archive-notice" hidden></p>
-          <div class="eyebrow">СОБЕСЕДОВАНИЕ</div>
+          <div class="eyebrow">Собеседование</div>
           <h2>Разговор начался</h2>
           <p class="intro">Слушай вопрос и отвечай в своём темпе. Можно попросить повторить.</p>
           <div class="session-details">
@@ -102,7 +101,7 @@
             <div><strong id="liveSpeaker">В ожидании первого вопроса</strong><span id="plannedCount">8 основных вопросов</span></div>
           </div>
           <div class="utterance" aria-live="off">
-            <div class="utterance-label">ПОСЛЕДНЯЯ РЕПЛИКА</div>
+            <div class="utterance-label">Последняя реплика</div>
             <p id="liveText">Сейчас Александр начнёт интервью…</p>
           </div>
           <button id="toggleTranscript" class="text-button" type="button" aria-expanded="false">Показать расшифровку <span aria-hidden="true">↗</span></button>
@@ -112,7 +111,7 @@
         </div>
 
         <div id="faultInfo" hidden>
-          <div class="eyebrow">ПРОВЕРКА РЕЗУЛЬТАТА</div>
+          <div class="eyebrow">Проверка результата</div>
           <h2>Проверяем ответы</h2>
           <p class="intro">Если оценка не появилась, попробуй ещё раз или начни новую тренировку.</p>
         </div>
@@ -134,7 +133,7 @@
       </section>
 
       <section id="results" class="results" hidden>
-        <div class="eyebrow">ТВОЙ РЕЗУЛЬТАТ</div>
+        <div class="eyebrow">Твой результат</div>
         <div class="result-hero"><div><h2>Интервью окончено</h2><p>Вот что удалось и над чем поработать.</p></div><div class="score"><strong id="score">—</strong><span>/10</span></div></div>
         <p id="verdict" class="verdict"></p>
         <p id="archiveStatus" class="archive-status" role="status"></p>
@@ -145,7 +144,7 @@
         <div class="result-section"><h3><span class="result-symbol forward">↗</span> Следующий шаг</h3><ul id="steps"></ul></div>
         <button id="again" class="button button-primary" type="button">Новое интервью</button>
       </section>
-      <p class="workspace-footnote">Голосовой формат · GPT-Live-1 · Итоговая оценка после завершения</p>
+      <p class="workspace-footnote">QuickCue · Локальное сохранение результатов · GPT-Live-1</p>
     </aside>
   </main>
 </div>

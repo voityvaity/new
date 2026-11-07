@@ -1,0 +1,53 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs/promises');
+const path=require('node:path');
+const {app,BrowserWindow,nativeTheme}=require('electron');
+
+app.on('window-all-closed',()=>{});
+
+async function check(mode) {
+  nativeTheme.themeSource=mode;
+  const window=new BrowserWindow({
+    width:1080,height:840,show:false,backgroundColor:mode==='dark'?'#000000':'#f2f2f7',
+    webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}
+  });
+  try{
+    await window.loadFile(path.join(__dirname,'../src/index.html'));
+    const checkScript=[
+      '(() => {',
+      'const icon=document.querySelector(".brand-icon");',
+      'const panel=document.querySelector(".panel");',
+      'const styles=getComputedStyle(document.documentElement);',
+      'return {title:document.querySelector(".brand-name")?.textContent,',
+      'iconWidth:icon?.naturalWidth, iconHeight:icon?.naturalHeight,',
+      'panelBackground:getComputedStyle(panel).backgroundColor,',
+      'accent:styles.getPropertyValue("--accent").trim(),',
+      'startVisible:!document.querySelector("#start").hidden,',
+      'fields:!!document.querySelector("#key")&&!!document.querySelector("#count")};',
+      '})()'
+    ].join('\n');
+    const state=await window.webContents.executeJavaScript(checkScript);
+    assert.match(state.title,/QuickCue/);
+    assert.equal(state.iconWidth,1024);
+    assert.equal(state.iconHeight,1024);
+    assert.equal(state.accent,mode==='dark'?'#0a84ff':'#007aff');
+    assert.equal(state.startVisible,true);
+    assert.equal(state.fields,true);
+    assert.notEqual(state.panelBackground,'rgba(0, 0, 0, 0)');
+    const image=await window.webContents.capturePage();
+    const png=image.toPNG();
+    assert.ok(png.length>20000,'Desktop screenshot unexpectedly small');
+    const target=path.join(__dirname,'../ui-preview');
+    await fs.mkdir(target,{recursive:true});
+    await fs.writeFile(path.join(target,'quickcue-'+mode+'.png'),png);
+    console.log('QuickCue '+mode+' theme and original iOS icon OK; screenshot '+png.length+' bytes');
+  } finally {
+    if(!window.isDestroyed())window.destroy();
+  }
+}
+app.whenReady().then(async()=>{
+  await check('light');
+  await check('dark');
+  app.quit();
+}).catch(e=>{console.error(e);app.exit(1);});
