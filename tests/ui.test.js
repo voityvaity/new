@@ -50,16 +50,17 @@ test('archive folder, JSON option and saved-report feedback are wired into UI',(
   assert.match(js,/result\.archive\?\.pdfFile/);
 });
 
-test('uses exact approved iOS QuickCue AppIcon, not invented JM branding',()=>{
-  const icon=fs.readFileSync(path.join(__dirname,'../assets/quickcue-app-icon.png'));
-  assert.equal(icon.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
-  assert.equal(icon.readUInt32BE(16),1024);
-  assert.equal(icon.readUInt32BE(20),1024);
-  const gitBlob=crypto.createHash('sha1')
-    .update('blob '+icon.length+'\0').update(icon).digest('hex');
-  assert.equal(gitBlob,'5de25e3c4c0bf5aa6fdc0bee1afa2c53f233b8e6');
-  assert.match(html,/class="brand-icon" src="\.\.\/assets\/quickcue-app-icon\.png"/);
+test('desktop logo follows the supplied graphite Q waveform artwork',()=>{
+  const svg=fs.readFileSync(path.join(__dirname,'../assets/quickcue-graphite.svg'),'utf8');
+  assert.match(svg,/<svg[^>]*viewBox="0 0 1254 1254"/);
+  assert.match(svg,/fill-rule="evenodd"/);
+  assert.match(svg,/radialGradient id="paper"/);
+  assert.match(html,/class="brand-icon" src="\.\.\/assets\/quickcue-graphite\.svg"/);
   assert.doesNotMatch(html,/class="brand-mark"|JM<span/);
+  const png=fs.readFileSync(path.join(__dirname,'../assets/quickcue-graphite.png'));
+  assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+  assert.equal(png.readUInt32BE(16),1024);
+  assert.equal(png.readUInt32BE(20),1024);
 });
 test('desktop design follows QuickCue semantic neutral/blue system palette',()=>{
   assert.match(css,/--accent:\s*#007aff/);

@@ -1,17 +1,17 @@
-# Generate a multi-resolution Windows ICO from the exact approved QuickCue iOS AppIcon.
-# No artistic modifications, recoloring, text overlays or new branding.
+# Generate Windows ICO from graphite Q/waveform icon traced from the user's supplied PNG.
+# The SVG retains the supplied Q silhouette and five waveform bars.
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 
 $root = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root "assets\quickcue-app-icon.png"
 $target = Join-Path $root "assets\quickcue-app-icon.ico"
-if (-not (Test-Path -LiteralPath $source)) { throw "Missing original QuickCue iOS icon" }
+if (-not (Test-Path -LiteralPath $source)) { throw "Missing rendered QuickCue graphite PNG" }
 
 $image = [System.Drawing.Image]::FromFile($source)
 try {
     if ($image.Width -ne 1024 -or $image.Height -ne 1024) {
-        throw "Expected the original 1024x1024 QuickCue AppIcon"
+        throw "Expected 1024x1024 graphite PNG"
     }
     [int[]]$sizes = @(16, 24, 32, 48, 64, 128, 256)
     $buffers = @()

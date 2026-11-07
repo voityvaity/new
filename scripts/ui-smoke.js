@@ -41,7 +41,7 @@ async function check(mode) {
     const target=path.join(__dirname,'../ui-preview');
     await fs.mkdir(target,{recursive:true});
     await fs.writeFile(path.join(target,'quickcue-'+mode+'.png'),png);
-    console.log('QuickCue '+mode+' theme and original iOS icon OK; screenshot '+png.length+' bytes');
+    console.log('QuickCue '+mode+' theme and supplied graphite waveform icon OK; screenshot '+png.length+' bytes');
   } finally {
     if(!window.isDestroyed())window.destroy();
   }
