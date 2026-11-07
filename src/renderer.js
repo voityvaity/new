@@ -546,6 +546,7 @@ async function stop(reason='manual') {
   if(!persisted){
     finishing=false;
     pendingEnd={archiveId,turns:transcript.map(t=>({...t})),endedAt};
+    $('faultTitle').textContent='Сохранение';
     phase('fault');
     $('retry').textContent='Повторить сохранение';
     status('Интервью не сохранено. Освободи место и повтори сохранение.',true);
@@ -556,6 +557,7 @@ async function stop(reason='manual') {
 async function grade() {
   if(grading)return;
   grading=true;
+  $('faultTitle').textContent='Оценка';
   phase('fault');
   $('retry').textContent='Повторить оценку';
   $('retry').hidden=true;
@@ -595,6 +597,7 @@ async function grade() {
   } finally{grading=false;finishing=false;}
 }
 function reset() {
+  if(pendingEnd && !window.confirm('Расшифровка ещё не сохранена. Начать заново и потерять несохранённые ответы?'))return;
   cleanup();
   void window.desktop?.clear();
   transcript=[];

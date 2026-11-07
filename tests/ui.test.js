@@ -169,3 +169,10 @@ test('paid result can be copied on an exceptional total disk failure',()=>{
 test('error text is not shown twice in the interface',()=>{
   assert.match(js,/\$\('status'\)\.textContent=error\?'Требуется внимание':message/);
 });
+
+test('fault heading and reset state correctly distinguish saving from grading',()=>{
+  assert.match(html,/id="faultTitle"/);
+  assert.match(js,/\$\('faultTitle'\)\.textContent='Сохранение'/);
+  assert.match(js,/\$\('faultTitle'\)\.textContent='Оценка'/);
+  assert.match(js,/if\(pendingEnd && !window\.confirm\(/);
+});

@@ -8,7 +8,7 @@ const path=require('node:path');
 function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart=false,
   delayCreatingJournal=false,failCreatingJournal=false,failGradeStoreInitially=false,
   failGradeRescueInitially=false}={}) {
-  const handlers=new Map(),windowHandlers=new Map(),settingsWrites=[];
+  const handlers=new Map(),windowHandlers=new Map(),appHandlers=new Map(),settingsWrites=[];
   const browserEvents=[],operationOrder=[],journalStates=[];
   let discarded=0;
   let releaseArchive=null,releaseJournal=null;
@@ -17,7 +17,7 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
   let win;
   let resolveLive,resolveGrade,gradeRequests=0,creationRequests=0;
   let storedGrade=null;
-  let destroyed=false;
+  let destroyed=false,quitCalls=0;
   const prefs={rememberKey:true,count:5,key:'',saveJson:false,reportDirectory:'C:\\MockReports'};
   const fakeSettings={
     read:async()=>({...prefs}),
@@ -77,8 +77,8 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
     app:{
       whenReady:()=>Promise.resolve(),
       getPath:()=>path.join(__dirname,'..'),
-      on:()=>{},
-      quit:()=>{}
+      on:(name,handler)=>appHandlers.set(name,handler),
+      quit:()=>{quitCalls++;}
     },
     BrowserWindow:FakeBrowserWindow,
     ipcMain:{handle:(name,handler)=>handlers.set(name,handler)},
@@ -167,7 +167,8 @@ function makeHarness({archiveStartFails=false,rejectLive=false,delayArchiveStart
     browserEvents,
     operationOrder,journalStates,
     get discarded(){return discarded;},
-    windowHandlers,
+    windowHandlers,appHandlers,
+    get quitCalls(){return quitCalls;},
     get win(){return win;},
     get sender(){return {sender:fakeWebContents};},
     get creationRequests(){return creationRequests;},
@@ -358,4 +359,20 @@ test('the user cannot accidentally close a lost paid grade without acknowledging
   h.windowHandlers.get('close')({preventDefault(){}});
   await h.tick();
   assert.equal(h.destroyed,true);
+});
+
+test('application quit during preflight cancels the entire Live creation task',async()=>{
+  const h=makeHarness({delayArchiveStart:true});await h.tick();
+  const pending=h.handlers.get('live:create')(h.sender,{
+    key:'sk-valid',sdp:'v=0\\r\\noffer',count:5,rememberKey:false
+  });
+  await h.tick();
+  let prevented=false;
+  h.appHandlers.get('before-quit')({preventDefault(){prevented=true;}});
+  assert.equal(prevented,true);
+  h.releaseArchive();
+  await assert.rejects(pending,/отменено/i);
+  await h.tick();
+  assert.equal(h.creationRequests,0);
+  assert.equal(h.quitCalls,1);
 });
