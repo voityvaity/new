@@ -37,7 +37,13 @@ function makeSession(requestedCount) {
 function makeGradeRequest(turns, requestedCount, observedMainQuestions=null) {
   if (!Array.isArray(turns) || turns.length > 2000) throw new Error('Некорректная расшифровка.');
   const cleaned = turns.filter(t => t && ['interviewer','candidate'].includes(t.role) && typeof t.text === 'string')
-    .map(t => ({role:t.role,text:t.text.slice(0,2500).trim()})).filter(t=>t.text);
+    .map(t => ({role:t.role,text:t.text.trim()})).filter(t=>t.text);
+  // Never silently discard part of a candidate's answer to save tokens.
+  // Oversized transcripts remain in the local archive and can be exported.
+  const totalChars=cleaned.reduce((total,t)=>total+t.text.length,0);
+  if(totalChars>250000)throw new Error(
+    'Расшифровка превышает 250 000 символов. Полный текст сохранён локально, автоматическая оценка ограничена по размеру.'
+  );
   const letters = cleaned.filter(t=>t.role==='candidate').reduce((total,t)=>total+t.text.length,0);
   if (letters < 60) throw new Error('Недостаточно распознанных ответов для оценки. Проверь микрофон и повтори интервью.');
   return {

@@ -127,3 +127,31 @@ test('rejects malformed PDF and keeps recovery data',async()=>{
     assert.equal(stored.evaluation.score,8);
   });
 });
+
+test('full long transcript is retained in local recovery and JSON export',async()=>{
+  await withTemp(async root=>{
+    const archive=makeArchive(root);
+    const {id}=await archive.start(5);
+    const longText='Слова ответа '.repeat(2500);
+    const full=[{role:'candidate',text:longText,start:0,end:30000}];
+    await archive.snapshot(id,full);
+    await archive.end(id,full);
+    const file=path.join(root,'drafts',id+'.json');
+    const stored=JSON.parse(await fs.readFile(file,'utf8'));
+    assert.equal(stored.transcript[0].text,longText);
+    const exported=await archive.exportReport(id,path.join(root,'reports'),true);
+    const doc=JSON.parse(await fs.readFile(exported.jsonFile,'utf8'));
+    assert.equal(doc.transcript[0].text,longText);
+  });
+});
+test('oversized transcript is rejected explicitly, never silently clipped',async()=>{
+  await withTemp(async root=>{
+    const a=makeArchive(root);
+    const {id}=await a.start(5);
+    await assert.rejects(a.snapshot(id,[{role:'candidate',text:'А'.repeat(500001)}]),
+      /слишком велика/);
+    await assert.rejects(a.snapshot(id,Array.from({length:2001},()=>({
+      role:'candidate',text:'Тест'
+    }))),/Слишком много фрагментов/);
+  });
+});

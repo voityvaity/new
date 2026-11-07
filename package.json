@@ -1,12 +1,12 @@
 {
   "name": "python-junior-mock",
   "productName": "Python Junior Mock",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "private": true,
   "main": "src/main.js",
   "scripts": {
     "start": "npm run icon:render && electron .",
-    "test": "node --test && node --check src/renderer.js && node --check src/main.js && node --check src/pdf-printer.js && node --check src/transcript-tracker.js",
+    "test": "node --test && node --check src/renderer.js && node --check src/main.js && node --check src/pdf-printer.js && node --check src/transcript-tracker.js && node --check src/live-lifecycle.js && node --check src/live-prompts.js",
     "test:pdf": "electron scripts/pdf-smoke.js",
     "test:ui": "electron scripts/ui-smoke.js",
     "icon:render": "electron scripts/render-icon.js",

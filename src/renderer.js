@@ -15,6 +15,7 @@ let archiveId=null, lastReportId=null;
 let draftDirty=false, draftSaving=false, draftDrain=Promise.resolve();
 let readyGate=null, liveActive=false, liveSessionId=null, liveDeadlineAt=0;
 let firstOutputSeen=false, greetingAttempts=0, greetingEventId=null, openingTimer=null;
+let audioPlaybackStarted=false, audioPlaybackError=false, lastSessionClose=null;
 let usageSeconds=0, fiveMinuteWarningShown=false, connectionAttempt=0;
 const OPENING_INSTRUCTION=window.LivePrompts.OPENING_PROMPT;
 
@@ -64,6 +65,7 @@ function requestOpening(){
   clearOpeningTimer();
   if(greetingAttempts<2)openingTimer=setTimeout(()=>{
     if(!firstOutputSeen&&liveActive&&!finishing){
+      $('repeatFirstQuestion').textContent='Повторить первый вопрос';
       $('repeatFirstQuestion').hidden=false;
       status('Первый вопрос не появился. Можно запросить его повторно.');
     }
@@ -90,6 +92,7 @@ async function abortStartup(message){
   status(message,true);
   try{await window.desktop?.hangupLive({aborted:true});}
   catch{status(message+' Не удалось подтвердить завершение сессии.',true);}
+  void refreshLiveStatus();
 }
 function refreshTranscript(){
   const list=$('transcriptList');
@@ -132,7 +135,11 @@ function persistDraft() {
     $('archiveNotice').textContent='Не удалось сохранить черновик: '+(error.message||String(error));
     $('archiveNotice').hidden=false;
     throw error;
-  }).finally(()=>{draftSaving=false;});
+  }).finally(()=>{
+    draftSaving=false;
+    // A new delta may have arrived between the last loop check and finally.
+    if(draftDirty)queueMicrotask(()=>{void persistDraft().catch(()=>{});});
+  });
   return draftDrain;
 }
 function scheduleDraft() {void persistDraft().catch(()=>{});}
@@ -174,6 +181,23 @@ async function refreshArchiveHistory() {
     list.append(li);
   }
 }
+async function refreshLiveStatus() {
+  if(!window.desktop?.getLiveStatus)return;
+  try {
+    const state=await window.desktop.getLiveStatus();
+    const uncertain=state.state==='unconfirmed'||state.history?.state==='unconfirmed';
+    const closing=state.state==='closing';
+    $('liveClosureNotice').hidden=!(uncertain||closing);
+    $('acknowledgeLive').hidden=!uncertain;
+    if(uncertain){
+      $('liveClosureText').textContent='OpenAI не подтвердил завершение предыдущей платной голосовой сессии. Перед продолжением проверь расходы в OpenAI Platform. Новое интервью можно начать только после явного подтверждения риска.';
+    }else if(closing){
+      $('liveClosureText').textContent='Ожидаю подтверждения завершения предыдущей голосовой сессии…';
+    }
+  }catch(error){
+    status('Не удалось проверить состояние голосовой сессии: '+error.message,true);
+  }
+}
 function status(message,error=false) {
   $('status').textContent=message;
   $('error').hidden=!error;
@@ -213,6 +237,7 @@ function cleanup() {
   readyGate?.dispose();readyGate=null;
   clearOpeningTimer();
   liveActive=false;liveSessionId=null;liveDeadlineAt=0;
+  audioPlaybackStarted=false;audioPlaybackError=false;
   $('repeatFirstQuestion').hidden=true;
   // Drafts are written continuously; a graceful stop awaits the final write.
   started=false;muted=false;greeted=false;
@@ -289,26 +314,34 @@ function onEvent(evt) {
       if(typeof evt.delta==='string' && evt.delta.length && !firstOutputSeen){
         firstOutputSeen=true;
         clearOpeningTimer();
-        $('repeatFirstQuestion').hidden=true;
+        // A transcript delta is not proof that audio reached the speakers.
+        if(!audioPlaybackStarted){
+          $('repeatFirstQuestion').textContent='Включить воспроизведение звука';
+          $('repeatFirstQuestion').hidden=false;
+        }else $('repeatFirstQuestion').hidden=true;
       }
       appendTranscript('interviewer',evt);
       if(!finishing){if(liveActive)status('Александр говорит');speech(true);}
       break;
-    case 'session.closed':
+    case 'session.closed': {
       usageSeconds=window.LiveLifecycle.cumulativeUsage(usageSeconds,evt);
-      if(closeResolve){closeResolve();closeResolve=null;}
-      else if(!finishing){
-        if(liveActive && liveDeadlineAt && Date.now()>=liveDeadlineAt-2000){
-          void stop('time_limit');
-        }else if(!liveActive){
-          void abortStartup('Голосовая сессия закрылась до начала интервью.');
-        }else{
-          void window.desktop?.hangupLive().catch(()=>{});
-          cleanup();phase('fault');
-          status('Голосовое соединение закрылось. Можно попробовать получить оценку.',true);
-        }
-      }
+      const final={
+        sessionId:liveSessionId,reason:evt.reason||'close_requested',usageSeconds
+      };
+      lastSessionClose=final;
+      // Only this server event confirms that WebRTC finalization completed.
+      void (async()=>{
+        if(final.sessionId)await window.desktop.confirmLiveClosed(final);
+      })().catch(error=>status('Сессия закрыта, но локальная запись подтверждения не удалась: '+error.message,true))
+        .finally(()=>{
+          if(closeResolve){closeResolve({confirmed:true});closeResolve=null;}
+          else if(!finishing){
+            if(liveActive)void stop('remote_closed');
+            else void abortStartup('Голосовая сессия закрылась до начала интервью.');
+          }
+        });
       break;
+    }
     case 'session.error':
     case 'error': {
       const message=evt.error?.message||evt.message||'Ошибка голосового соединения.';
@@ -349,6 +382,7 @@ async function begin() {
   archiveId=null;lastReportId=null;
   draftDirty=false;draftSaving=false;draftDrain=Promise.resolve();
   firstOutputSeen=false;greetingAttempts=0;greetingEventId=null;
+  audioPlaybackStarted=false;audioPlaybackError=false;lastSessionClose=null;
   usageSeconds=0;fiveMinuteWarningShown=false;liveSessionId=null;liveDeadlineAt=0;
   $('archiveNotice').hidden=true;
   $('archiveNotice').textContent='';
@@ -370,13 +404,25 @@ async function begin() {
     pc.addEventListener('track',({track})=>{
       if(attempt!==connectionAttempt)return;
       sound.srcObject=new MediaStream([track]);
-      sound.play().catch(()=>status('Не удалось воспроизвести голос. Проверь звук Windows.',true));
+      sound.play().then(()=>{
+        audioPlaybackStarted=true;
+        audioPlaybackError=false;
+        if(firstOutputSeen)$('repeatFirstQuestion').hidden=true;
+      }).catch(()=>{
+        audioPlaybackError=true;
+        $('repeatFirstQuestion').textContent='Включить воспроизведение звука';
+        $('repeatFirstQuestion').hidden=false;
+        status('Звук не воспроизводится. Нажми «Включить воспроизведение звука» и проверь звук Windows.',true);
+      });
     });
     pc.addEventListener('connectionstatechange',()=>{
       if(attempt!==connectionAttempt||!pc||pc!==peer||finishing)return;
       if(pc.connectionState==='failed'){
         if(!liveActive)void abortStartup('Не удалось установить голосовое соединение.');
-        else status('Соединение прервано. Заверши интервью для оценки.',true);
+        else{
+          if(liveSessionId)void window.desktop.markLiveTransportLost(liveSessionId).catch(()=>{});
+          void stop('connection_lost');
+        }
       }
     });
     const stream=await navigator.mediaDevices.getUserMedia({
@@ -429,13 +475,32 @@ async function begin() {
       await abortStartup(error instanceof Error?error.message:String(error));
   }
 }
-function disconnectGracefully(){
+function disconnectGracefully(reason='manual'){
+  if(liveSessionId)void window.desktop.requestLiveClose(reason).catch(()=>{});
   return new Promise(resolve=>{
-    if(channel?.readyState!=='open'){resolve();return;}
+    if(lastSessionClose?.sessionId===liveSessionId && liveSessionId){
+      resolve({confirmed:true});return;
+    }
+    if(channel?.readyState!=='open'){
+      if(liveSessionId)void window.desktop.markLiveTransportLost(liveSessionId).catch(()=>{});
+      resolve({confirmed:false});return;
+    }
     let done=false;
-    const t=setTimeout(()=>{if(!done){done=true;closeResolve=null;resolve();}},3500);
-    closeResolve=()=>{if(done)return;done=true;clearTimeout(t);resolve();};
-    if(!send('session.close')){clearTimeout(t);closeResolve=null;resolve();}
+    const t=setTimeout(()=>{
+      if(done)return;
+      done=true;closeResolve=null;
+      if(liveSessionId)void window.desktop.markLiveTransportLost(liveSessionId).catch(()=>{});
+      resolve({confirmed:false});
+    },5000);
+    closeResolve=(result={confirmed:true})=>{
+      if(done)return;
+      done=true;clearTimeout(t);resolve(result);
+    };
+    if(!send('session.close',{event_id:'end-'+Date.now()})){
+      clearTimeout(t);closeResolve=null;
+      if(liveSessionId)void window.desktop.markLiveTransportLost(liveSessionId).catch(()=>{});
+      resolve({confirmed:false});
+    }
   });
 }
 async function stop(reason='manual') {
@@ -446,14 +511,19 @@ async function stop(reason='manual') {
     ? 'Лимит 30 минут достигнут. Завершаю интервью и сохраняю ответы…'
     : 'Завершаю собеседование…');
   const endedAt=new Date().toISOString(); // Before network shutdown and evaluation.
-  await disconnectGracefully();
+  const closed=await disconnectGracefully(reason);
+  if(!closed.confirmed){
+    $('archiveNotice').textContent='OpenAI не подтвердил закрытие голосовой сессии. Проверь подключение перед новым интервью.';
+    $('archiveNotice').hidden=false;
+  }
   try{
     await persistDraft();
     if(archiveId)await window.desktop.endInterview({
       archiveId,turns:transcript.map(t=>({...t})),endedAt
     });
   }catch(error){
-    $('archiveNotice').textContent='Не удалось сохранить окончание интервью: '+error.message;
+    const previous=$('archiveNotice').hidden?'':$('archiveNotice').textContent+' ';
+    $('archiveNotice').textContent=previous+'Не удалось сохранить окончание интервью: '+error.message;
     $('archiveNotice').hidden=false;
   }
   cleanup();
@@ -504,6 +574,7 @@ function reset() {
   archiveId=null;lastReportId=null;
   finishing=false;grading=false;closeResolve=null;
   firstOutputSeen=false;greetingAttempts=0;greetingEventId=null;
+  audioPlaybackStarted=false;audioPlaybackError=false;lastSessionClose=null;
   usageSeconds=0;fiveMinuteWarningShown=false;
   if(savedKeyReady && $('rememberKey').checked)void window.desktop.getPrefs().then(p=>{$('key').value=p.key||'';}).catch(()=>{});
   toggleTranscript(false);
@@ -516,6 +587,7 @@ function reset() {
   $('excerpt').textContent='Новая попытка: поговори с интервьюером голосом.';
   phase('idle');status('Готов к собеседованию');
   void refreshArchiveHistory();
+  void refreshLiveStatus();
 }
 $('showKey').addEventListener('click',()=>{
   const input=$('key');
@@ -537,6 +609,7 @@ async function initSettings(){
     $('saveJson').checked=prefs.saveJson!==false;
     savedKeyReady=true;
     void refreshArchiveHistory();
+    void refreshLiveStatus();
   } catch {savedKeyReady=false;}
 }
 $('clearKey').addEventListener('click',async()=>{
@@ -584,12 +657,27 @@ $('count').addEventListener('change',()=>{
   void window.desktop?.savePrefs({count:Number($('count').value)}).catch(()=>{});
 });
 $('start').addEventListener('click',begin);
+$('acknowledgeLive').addEventListener('click',async()=>{
+  try{
+    await window.desktop.acknowledgeUnknownLive();
+    $('liveClosureNotice').hidden=true;
+    $('acknowledgeLive').hidden=true;
+    status('Риск неподтверждённой предыдущей сессии принят. Можно продолжить.');
+  }catch(error){status('Не удалось подтвердить продолжение: '+error.message,true);}
+});
 $('cancelConnecting').addEventListener('click',()=>{
   void abortStartup('Подключение отменено. Голосовая сессия закрыта.');
 });
 $('repeatFirstQuestion').addEventListener('click',()=>{
-  if(!firstOutputSeen && requestOpening())
+  if(firstOutputSeen && !audioPlaybackStarted){
+    void sound.play().then(()=>{
+      audioPlaybackStarted=true;audioPlaybackError=false;
+      $('repeatFirstQuestion').hidden=true;
+      status('Воспроизведение включено.');
+    }).catch(()=>status('Не удалось включить звук. Проверь устройство вывода Windows.',true));
+  }else if(!firstOutputSeen && requestOpening()){
     status('Повторно запросил первый вопрос · слушаю');
+  }
 });
 $('stop').addEventListener('click',()=>{void stop();});
 $('mute').addEventListener('click',()=>{
@@ -603,11 +691,38 @@ $('mute').addEventListener('click',()=>{
 $('retry').addEventListener('click',()=>{void grade();});
 $('reset').addEventListener('click',reset);
 $('again').addEventListener('click',reset);
-if(window.desktop?.onTimeLimit){
-  window.desktop.onTimeLimit(payload=>{
-    if(!liveSessionId || payload?.sessionId!==liveSessionId || finishing || grading)return;
-    if(liveActive)void stop('time_limit');
-    else void abortStartup('Лимит времени голосовой сессии достигнут до начала интервью.');
+if(window.desktop?.onCloseRequest){
+  window.desktop.onCloseRequest(payload=>{
+    if(!liveSessionId || payload?.sessionId!==liveSessionId)return;
+    if(payload.reason==='time_limit' && !finishing && !grading){
+      if(liveActive)void stop('time_limit');
+      else void abortStartup('Лимит времени голосовой сессии достигнут до начала интервью.');
+    }else if(payload.reason==='app_quit' && !finishing && channel?.readyState==='open'){
+      send('session.close',{event_id:'quit-'+Date.now()});
+    }
+  });
+}
+if(window.desktop?.onUnconfirmedClose){
+  window.desktop.onUnconfirmedClose(()=>{void refreshLiveStatus();});
+}
+if(window.desktop?.onWindowCloseRequest){
+  window.desktop.onWindowCloseRequest(()=>{
+    void (async()=>{
+      if(!finishing && liveActive){
+        finishing=true;
+        const endedAt=new Date().toISOString();
+        await disconnectGracefully('app_quit');
+        try{
+          await persistDraft();
+          if(archiveId)await window.desktop.endInterview({
+            archiveId,turns:transcript.map(t=>({...t})),endedAt
+          });
+        }catch(error){console.warn('Archive during window close:',error.message);}
+      }else if(!liveActive && pc){
+        await abortStartup('Закрытие окна во время подключения.');
+      }
+    })().catch(error=>console.warn('Close window:',error.message))
+      .finally(()=>{void window.desktop.finishWindowClose().catch(()=>{});});
   });
 }
 window.addEventListener('beforeunload',()=>{

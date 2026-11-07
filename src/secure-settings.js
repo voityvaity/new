@@ -2,6 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const {questionCount: normalizeCount} = require('./logic');
+const {atomicWrite} = require('./interview-archive');
 
 function createSettingsStore({userData, secureStorage, defaultReportDirectory = path.join(userData, 'Интервью')}) {
   const filename=path.join(userData,'settings.json');
@@ -39,8 +40,9 @@ function createSettingsStore({userData, secureStorage, defaultReportDirectory = 
       }
       secret=secureStorage.encryptString(finalKey).toString('base64');
     }
-    await fs.mkdir(userData,{recursive:true});
-    await fs.writeFile(filename,JSON.stringify({rememberKey:remember,count:n,secret,reportDirectory:folder,saveJson:withJson}),{mode:0o600});
+    await atomicWrite(filename,JSON.stringify({
+      rememberKey:remember,count:n,secret,reportDirectory:folder,saveJson:withJson
+    }));
     return {rememberKey:remember,count:n,hasKey:Boolean(secret),reportDirectory:folder,saveJson:withJson};
   }
 

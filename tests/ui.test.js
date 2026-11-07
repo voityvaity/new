@@ -105,9 +105,25 @@ test('main-process Live cap and cumulative usage guard are wired',()=>{
   const main=fs.readFileSync(path.join(base,'main.js'),'utf8');
   assert.ok(main.includes('createLiveGuard('));
   assert.ok(main.includes("+'/hangup'"));
-  assert.ok(main.includes("mainWindow.webContents.send('live:time-limit'"));
-  assert.ok(js.includes('window.desktop?.onTimeLimit'));
+  assert.ok(main.includes("mainWindow.webContents.send('live:close-request'"));
+  assert.ok(js.includes('window.desktop?.onCloseRequest'));
+  assert.ok(js.includes('window.desktop.confirmLiveClosed('));
+  assert.ok(js.includes('window.desktop.markLiveTransportLost('));
+  assert.ok(main.includes('live:window-close-ready'));
+  assert.ok(html.includes('id="liveClosureNotice"'));
+  assert.ok(html.includes('id="acknowledgeLive"'));
   assert.ok(js.includes("stop('time_limit')"));
   assert.ok(html.includes('Лимит 30 минут'));
   assert.ok(js.includes('session.usage.updated'));
+});
+
+test('unknown closure is surfaced instead of silently allowing overlapping sessions',()=>{
+  const main=fs.readFileSync(path.join(base,'main.js'),'utf8');
+  const lifecycle=fs.readFileSync(path.join(base,'live-lifecycle.js'),'utf8');
+  assert.match(lifecycle,/Previous Live session is not confirmed closed/);
+  assert.match(lifecycle,/function acknowledgeUnknown/);
+  assert.match(lifecycle,/function confirmClosed/);
+  assert.match(main,/live_creation_response_unknown/);
+  assert.match(main,/window-close-request/);
+  assert.match(js,/refreshLiveStatus/);
 });

@@ -205,3 +205,8 @@ button:focus-visible,input:focus-visible,select:focus-visible { outline: 3px sol
 #remainingTime {font-variant-numeric:tabular-nums;color:var(--muted);}
 #repeatFirstQuestion {margin-top:12px;}
 #cancelConnecting {width:100%;}
+
+#liveClosureNotice {display:flex;flex-direction:column;gap:10px;align-items:flex-start;}
+#liveClosureNotice[hidden],#acknowledgeLive[hidden] {display:none!important;}
+#liveClosureText {font-size:12px;line-height:1.5;}
+#acknowledgeLive {color:var(--danger);border-color:rgba(255,59,48,.25);}

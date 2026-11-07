@@ -42,3 +42,11 @@ test('GPT-Live opening instructions are seeded and reused for commentary',()=>{
   assert.match(OPENING_PROMPT,/Вопрос 1:/);
   assert.match(OPENING_PROMPT,/дождись ответа/);
 });
+
+test('long spoken answers are NOT silently truncated before GPT grading',()=>{
+  const candidate='Python генератор: '.repeat(230);
+  const request=makeGradeRequest([{role:'candidate',text:candidate}],8,1);
+  assert.equal(JSON.parse(request.input).transcript[0].text,candidate.trim());
+  assert.throws(()=>makeGradeRequest([{role:'candidate',text:'а'.repeat(250001)}],8),
+    /Расшифровка превышает/);
+});

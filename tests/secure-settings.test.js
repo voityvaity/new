@@ -57,3 +57,15 @@ test('report directory and JSON preference survive restart and concurrent update
     await assert.rejects(prefs.save({reportDirectory:'relative-path'}),/абсолютная/);
   }finally{await fs.rm(folder,{recursive:true,force:true});}
 });
+
+test('settings replacement is atomic and leaves no temporary file after concurrent saves',async()=>{
+  const folder=await fs.mkdtemp(path.join(os.tmpdir(),'mock-settings-'));
+  try{
+    const prefs=createSettingsStore({userData:folder,secureStorage:storage});
+    await Promise.all(Array.from({length:12},(_,i)=>prefs.save({count:[5,8,10][i%3]})));
+    const items=await fs.readdir(folder);
+    assert.deepEqual(items.sort(),['settings.json']);
+    const raw=JSON.parse(await fs.readFile(path.join(folder,'settings.json'),'utf8'));
+    assert.ok([5,8,10].includes(raw.count));
+  }finally{await fs.rm(folder,{recursive:true,force:true});}
+});

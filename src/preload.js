@@ -3,11 +3,27 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
   create: (payload) => ipcRenderer.invoke('live:create', payload),
   hangupLive: (payload = {}) => ipcRenderer.invoke('live:hangup',payload),
-  onTimeLimit: (callback) => {
-    const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on('live:time-limit',listener);
-    return () => ipcRenderer.removeListener('live:time-limit',listener);
+  requestLiveClose: (reason='manual') => ipcRenderer.invoke('live:request-close',{reason}),
+  confirmLiveClosed: (payload) => ipcRenderer.invoke('live:confirmed-close',payload),
+  markLiveTransportLost: (sessionId) => ipcRenderer.invoke('live:transport-lost',{sessionId}),
+  getLiveStatus: () => ipcRenderer.invoke('live:get-status'),
+  acknowledgeUnknownLive: () => ipcRenderer.invoke('live:acknowledge-unknown'),
+  onCloseRequest: (callback) => {
+    const listener = (_event,payload) => callback(payload);
+    ipcRenderer.on('live:close-request',listener);
+    return () => ipcRenderer.removeListener('live:close-request',listener);
   },
+  onUnconfirmedClose: (callback) => {
+    const listener = (_event,payload) => callback(payload);
+    ipcRenderer.on('live:unconfirmed',listener);
+    return () => ipcRenderer.removeListener('live:unconfirmed',listener);
+  },
+  onWindowCloseRequest: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on('live:window-close-request',listener);
+    return () => ipcRenderer.removeListener('live:window-close-request',listener);
+  },
+  finishWindowClose: () => ipcRenderer.invoke('live:window-close-ready'),
   grade: (payload) => ipcRenderer.invoke('interview:grade', payload),
   saveDraft: (payload) => ipcRenderer.invoke('interview:draft', payload),
   endInterview: (payload) => ipcRenderer.invoke('interview:end', payload),

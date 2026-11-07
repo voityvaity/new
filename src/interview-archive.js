@@ -5,15 +5,26 @@ const {randomUUID} = require('node:crypto');
 
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const MAX_TURNS = 2000;
+const MAX_TRANSCRIPT_CHARS = 500000;
 function cleanTurns(turns) {
   if (!Array.isArray(turns)) return [];
-  return turns.slice(0, 2000)
+  if (turns.length > MAX_TURNS)
+    throw new Error('Слишком много фрагментов расшифровки: требуется объединение, а не обрезание.');
+  let totalChars=0;
+  const cleaned=turns
     .filter(t => t && ['candidate', 'interviewer'].includes(t.role) && typeof t.text === 'string')
-    .map(t => ({
-      role: t.role, text: t.text.slice(0, 2500),
-      start: Number.isFinite(t.start) ? t.start : null,
-      end: Number.isFinite(t.end) ? t.end : null
-    })).filter(t => t.text.trim());
+    .map(t => {
+      totalChars+=t.text.length;
+      return {
+        role:t.role, text:t.text,
+        start:Number.isFinite(t.start)?t.start:null,
+        end:Number.isFinite(t.end)?t.end:null
+      };
+    }).filter(t => t.text.trim());
+  if (totalChars > MAX_TRANSCRIPT_CHARS)
+    throw new Error('Расшифровка слишком велика для одного файла, данные не были обрезаны.');
+  return cleaned;
 }
 
 function escapeHtml(value) {

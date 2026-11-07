@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const {createSettingsStore} = require('./secure-settings');
 const path = require('node:path');
 const {makeSession,makeGradeRequest,parseGrade,questionCount} = require('./logic');
-const {createInterviewArchive} = require('./interview-archive');
+const {createInterviewArchive,atomicWrite} = require('./interview-archive');
 const {printReport} = require('./pdf-printer');
 const {createLiveGuard} = require('./live-lifecycle');
 let mainWindow=null;
@@ -13,11 +13,22 @@ let settings=null;
 let archive=null;
 let liveGuard=null;
 let quitHangupStarted=false;
-let creatingLive=false, cancelPendingCreate=false;
+let creatingLive=false, cancelPendingCreate=false, creatingLivePromise=null;
+let closureStatusFile=null, storedClosure=null, closureLoaded=Promise.resolve();
+let closureWrites=Promise.resolve();
+function rememberClosure(value) {
+  storedClosure=value;
+  if(!closureStatusFile)return Promise.resolve();
+  // Serialize changes so a late "unconfirmed" write cannot overwrite a
+  // newer confirmed/acknowledged state on disk.
+  const work=closureWrites.then(()=>atomicWrite(closureStatusFile,JSON.stringify(value,null,2)));
+  closureWrites=work.catch(error=>console.warn('Cannot save Live closure status:',error.message));
+  return work;
+}
 
 async function hangupRemote(sessionId,key) {
-  // Authoritative stop: survives a blocked renderer / suspended WebRTC UI.
-  // A closed session may already have disappeared; that is an acceptable outcome.
+  // Best-effort emergency fallback ONLY. This endpoint is documented for SIP;
+  // its response does not certify termination of a WebRTC voice session.
   const url='https://api.openai.com/v1/live/sessions/'+encodeURIComponent(sessionId)+'/hangup';
   const response=await fetch(url,{
     method:'POST',headers:{Authorization:'Bearer '+key},
@@ -26,9 +37,12 @@ async function hangupRemote(sessionId,key) {
   if(!response.ok && response.status!==404 && response.status!==409)
     throw new Error('Не удалось подтвердить завершение голосовой сессии: HTTP '+response.status);
 }
-function closeLiveInBackground() {
-  if(!liveGuard?.hasActive())return;
-  void liveGuard.close().catch(error=>console.warn('Live hangup failed:',error.message));
+function closeLiveInBackground(reason='manual') {
+  if(liveGuard?.hasActive())liveGuard.requestClose(reason);
+}
+function currentLiveStatus() {
+  const status=liveGuard?.snapshot()||{state:'idle'};
+  return {...status,history:storedClosure};
 }
 
 async function post(url,key,payload,timeout=60000) {
@@ -58,6 +72,19 @@ function createWindow() {
     webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true}
   });
   mainWindow.removeMenu();
+  let windowCloseRequested=false;
+  mainWindow.on('close',event=>{
+    if(windowCloseRequested || (!creatingLive && !liveGuard?.hasActive()))return;
+    event.preventDefault();
+    windowCloseRequested=true;
+    const windowToClose=mainWindow;
+    if(!windowToClose.isDestroyed())
+      windowToClose.webContents.send('live:window-close-request');
+    // Never trap the user in a window that cannot be closed.
+    setTimeout(()=>{
+      if(!windowToClose.isDestroyed())windowToClose.destroy();
+    },8500);
+  });
   mainWindow.loadFile(path.join(__dirname,'index.html'));
   mainWindow.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   mainWindow.webContents.on('will-navigate',e=>e.preventDefault());
@@ -65,6 +92,11 @@ function createWindow() {
 
 app.whenReady().then(()=>{
   const userData=app.getPath('userData');
+  closureStatusFile=path.join(userData,'live-closure-status.json');
+  closureLoaded=fs.readFile(closureStatusFile,'utf8').then(raw=>{
+    storedClosure=JSON.parse(raw);
+    if(storedClosure?.state==='confirmed')storedClosure=null;
+  }).catch(()=>{});
   settings=createSettingsStore({
     userData, secureStorage:safeStorage,
     defaultReportDirectory:path.join(app.getPath('documents'),'Python Junior Mock','Интервью')
@@ -74,12 +106,18 @@ app.whenReady().then(()=>{
     generatePdf:printReport
   });
   liveGuard=createLiveGuard({
-    hangup:hangupRemote,
+    fallbackHangup:hangupRemote,
     notify:payload=>{
       if(mainWindow && !mainWindow.isDestroyed())
-        mainWindow.webContents.send('live:time-limit',payload);
+        mainWindow.webContents.send('live:close-request',payload);
     },
-    onError:error=>console.warn('Live cost guard:',error.message)
+    onUnconfirmed:status=>{
+      void rememberClosure({state:'unconfirmed',sessionId:status.sessionId,
+        reason:status.lastClosure?.reason||'no_session_closed',
+        at:new Date().toISOString()});
+      if(mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('live:unconfirmed',status);
+    }
   });
   session.defaultSession.setPermissionRequestHandler((contents,permission,callback)=>{
     callback(Boolean(mainWindow&&contents.id===mainWindow.webContents.id&&permission==='media'&&contents.getURL().startsWith('file://')));
@@ -89,15 +127,36 @@ app.whenReady().then(()=>{
 });
 app.on('window-all-closed',()=>{apiKey=null;if(process.platform!=='darwin')app.quit();});
 app.on('before-quit',event=>{
-  if(quitHangupStarted||!liveGuard?.hasActive())return;
+  if(quitHangupStarted||(!creatingLive && !liveGuard?.hasActive()))return;
   event.preventDefault();
   quitHangupStarted=true;
-  // Try an authoritative hangup on exit, with a short bounded shutdown wait.
-  let timeoutId;
-  const timeout=new Promise(resolve=>{timeoutId=setTimeout(resolve,3500);});
-  void Promise.race([liveGuard.close().catch(error=>{
-    console.warn('Live hangup on exit:',error.message);
-  }),timeout]).finally(()=>{clearTimeout(timeoutId);app.quit();});
+  cancelPendingCreate=true;
+  void (async()=>{
+    // Do not abandon a request that might have created a paid session.
+    if(creatingLivePromise){
+      let timeoutId;
+      const timeout=new Promise(resolve=>{timeoutId=setTimeout(resolve,47000);});
+      await Promise.race([creatingLivePromise.catch(()=>{}),timeout]);
+      clearTimeout(timeoutId);
+      if(creatingLive){
+        await rememberClosure({state:'unconfirmed',
+          reason:'window_closed_while_session_creation_pending',
+          at:new Date().toISOString()});
+      }
+    }
+    if(liveGuard?.hasActive()){
+      liveGuard.requestClose('app_quit');
+      const state=await liveGuard.waitForResolution(8500);
+      if(state.state!=='idle'&&state.state!=='unconfirmed')
+        liveGuard.markUnconfirmed('app_quit_without_terminal_event');
+      const current=liveGuard.snapshot();
+      if(current.state==='unconfirmed')
+        await rememberClosure({state:'unconfirmed',sessionId:current.sessionId,
+          reason:current.lastClosure?.reason||'app_quit_without_confirmation',
+          at:new Date().toISOString()});
+    }
+  })().catch(error=>console.warn('Graceful quit:',error.message))
+    .finally(()=>app.quit());
 });
 
 ipcMain.handle('live:create',async(event,payload={})=>{
@@ -105,30 +164,52 @@ ipcMain.handle('live:create',async(event,payload={})=>{
   const {key,sdp,count,rememberKey}=payload||{};
   if(typeof key!=='string'||!key.startsWith('sk-')||key.length>512)throw new Error('Нужен ключ OpenAI API (sk-...).');
   if(typeof sdp!=='string'||!sdp.startsWith('v=0')||sdp.length>65536)throw new Error('Некорректный SDP микрофона.');
+  await closureLoaded;
+  if(storedClosure?.state==='unconfirmed')
+    throw new Error('Завершение предыдущей голосовой сессии не подтверждено. Проверь предупреждение и подтверди продолжение на свой риск.');
   if(creatingLive || liveGuard.hasActive())
-    throw new Error('Дождись завершения предыдущего подключения.');
+    throw new Error('Предыдущая платная сессия ещё не подтверждена закрытой.');
   creatingLive=true;
   cancelPendingCreate=false;
   try{
   const requestedAt=Date.now();
-  const result=await post('https://api.openai.com/v1/live/sessions',key,{
+  creatingLivePromise=post('https://api.openai.com/v1/live/sessions',key,{
     session:makeSession(count),transport:{type:'webrtc',sdp}
   },45000);
+  let result;
+  try{result=await creatingLivePromise;}
+  catch(error){
+    // A transport failure can leave the outcome unknown: a remote session
+    // might exist even if the response containing its ID never arrived.
+    if(error?.name==='TimeoutError'||error?.name==='AbortError'||
+       error?.cause?.code==='ECONNRESET'){
+      await rememberClosure({state:'unconfirmed',
+        reason:'live_creation_response_unknown',at:new Date().toISOString()});
+    }
+    throw error;
+  }
   if(typeof result?.transport?.sdp!=='string'||typeof result?.session?.id!=='string'){
+    await rememberClosure({state:'unconfirmed',
+      sessionId:typeof result?.session?.id==='string'?result.session.id:null,
+      reason:'live_create_response_missing_parameters',at:new Date().toISOString()});
     if(typeof result?.session?.id==='string')
       void hangupRemote(result.session.id,key).catch(()=>{});
     throw new Error('OpenAI не прислал параметры голосового соединения.');
   }
   if(cancelPendingCreate){
-    await hangupRemote(result.session.id,key).catch(error=>
-      console.warn('Cancelled startup hangup:',error.message));
-    throw new Error('Подключение отменено.');
+    // No WebRTC data channel may exist yet. Keep the ID and report uncertainty
+    // rather than claiming that the SIP fallback authoritatively closed it.
+    try{liveGuard.activate({id:result.session.id,key,startedAt:requestedAt});
+      liveGuard.requestClose('cancelled_startup');}
+    catch(error){console.warn('Cancelled startup cleanup:',error.message);}
+    throw new Error('Подключение отменено; завершение сессии проверяется.');
   }
   let liveInfo;
   try{
     liveInfo=liveGuard.activate({id:result.session.id,key,startedAt:requestedAt});
   }catch(error){
-    void hangupRemote(result.session.id,key).catch(()=>{});
+    await rememberClosure({state:'unconfirmed',sessionId:result.session.id,
+      reason:'could_not_register_live_session',at:new Date().toISOString()});
     throw error;
   }
   apiKey=key;
@@ -142,6 +223,7 @@ ipcMain.handle('live:create',async(event,payload={})=>{
   return {sdp:result.transport.sdp,saveWarning,archiveWarning,archiveId,...liveInfo};
   }finally{
     creatingLive=false;
+    creatingLivePromise=null;
     cancelPendingCreate=false;
   }
 });
@@ -149,7 +231,7 @@ ipcMain.handle('live:create',async(event,payload={})=>{
 ipcMain.handle('interview:grade',async(event,payload={})=>{
   validateSender(event);
   if(!apiKey)throw new Error('Сессия не активна. Начни интервью заново.');
-  closeLiveInBackground(); // Billing guard ends before the potentially slow grading request.
+  closeLiveInBackground('grading'); // Do not call remote closure "confirmed" until session.closed.
   const request=makeGradeRequest(payload.turns,payload.count,payload.observedMainQuestions);
   const result=parseGrade(await post('https://api.openai.com/v1/responses',apiKey,request,90000));
   let archiveResult=null, archiveWarning=null, evaluationSaved=false;
@@ -180,7 +262,7 @@ ipcMain.handle('interview:draft',async(event,payload={})=>{
 ipcMain.handle('interview:end',async(event,payload={})=>{
   validateSender(event);
   if(!apiKey)throw new Error('Нет активного интервью.');
-  closeLiveInBackground();
+  closeLiveInBackground('interview_end');
   return archive.end(payload.archiveId,payload.turns,payload.endedAt);
 });
 ipcMain.handle('reports:list',async event=>{
@@ -192,19 +274,54 @@ ipcMain.handle('reports:export',async(event,payload={})=>{
   const prefs=await settings.read();
   return archive.exportReport(payload.id,prefs.reportDirectory,prefs.saveJson);
 });
-ipcMain.handle('live:hangup',async(event,payload={})=>{
+ipcMain.handle('live:window-close-ready',event=>{
+  validateSender(event);
+  if(mainWindow && !mainWindow.isDestroyed())mainWindow.destroy();
+  return true;
+});
+ipcMain.handle('live:request-close',(event,payload={})=>{
+  validateSender(event);
+  return liveGuard.requestClose(
+    ['manual','time_limit','cancelled_startup','startup_error','grading'].includes(payload.reason)
+      ? payload.reason : 'manual'
+  );
+});
+ipcMain.handle('live:confirmed-close',async(event,payload={})=>{
+  validateSender(event);
+  if(typeof payload.sessionId!=='string')return false;
+  const confirmed=liveGuard.confirmClosed(payload);
+  if(confirmed)await rememberClosure({state:'confirmed',
+    sessionId:payload.sessionId,reason:payload.reason||'close_requested',
+    usageSeconds:payload.usageSeconds,at:new Date().toISOString()});
+  return confirmed;
+});
+ipcMain.handle('live:transport-lost',(event,payload={})=>{
+  validateSender(event);
+  return liveGuard.transportLost(payload.sessionId);
+});
+ipcMain.handle('live:get-status',async event=>{
+  validateSender(event);
+  await closureLoaded;
+  return currentLiveStatus();
+});
+ipcMain.handle('live:acknowledge-unknown',async event=>{
+  validateSender(event);
+  const released=liveGuard.acknowledgeUnknown();
+  if(storedClosure?.state==='unconfirmed' || released)
+    await rememberClosure({state:'unconfirmed_acknowledged',
+      reason:'user_accepted_risk',at:new Date().toISOString()});
+  return released;
+});
+ipcMain.handle('live:hangup',(event,payload={})=>{
   validateSender(event);
   if(payload.aborted===true && creatingLive)cancelPendingCreate=true;
-  const result=await liveGuard.close().catch(error=>{
-    console.warn('Live hangup:',error.message);
-    return false;
-  });
+  const state=liveGuard.requestClose(payload.aborted===true?'cancelled_startup':'manual');
   if(payload.aborted===true)apiKey=null;
-  return result;
+  return state;
 });
 ipcMain.handle('interview:clear',event=>{
   validateSender(event);
-  closeLiveInBackground();
+  closeLiveInBackground('manual');
   apiKey=null;
   return true;
 });

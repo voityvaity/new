@@ -54,12 +54,15 @@ function createQuestionTracker(total) {
   let overLimit=false;
   let gapDetected=false;
   function inspect(turns) {
-    const marked = [];
-    for (const turn of turns) {
-      if (turn.role !== 'interviewer') continue;
-      const re = new RegExp(MAIN_LABEL.source,MAIN_LABEL.flags);
-      for (const match of turn.text.matchAll(re)) marked.push(Number(match[1]));
-    }
+    // Question headers may be split across audio packets, including a long
+    // pause that created two visible segments ("Вопрос" and "1:").
+    // The counter parses the full interviewer stream, not UI turn boundaries.
+    const interviewerText=turns
+      .filter(turn=>turn?.role==='interviewer' && typeof turn.text==='string')
+      .map(turn=>turn.text).join(' ');
+    const marked=[];
+    for(const match of interviewerText.matchAll(new RegExp(MAIN_LABEL.source,MAIN_LABEL.flags)))
+      marked.push(Number(match[1]));
     for (const number of marked) {
       if (seen.has(number)) continue;
       seen.add(number);

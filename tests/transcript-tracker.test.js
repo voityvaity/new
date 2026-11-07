@@ -76,3 +76,13 @@ test('question limit detects an explicitly numbered extra and gaps',()=>{
   q2.reset();
   assert.equal(q2.confirmed,0);
 });
+
+test('numbered question split by a >1.8s speaker pause is still counted',()=>{
+  const t=createTranscriptTracker();
+  t.append('interviewer','Вопрос ',0,200,'question-one');
+  t.append('interviewer','1: что такое генератор?',2500,3000,'question-two');
+  const turns=t.turns();
+  assert.equal(turns.length,2);
+  const q=createQuestionTracker(5);
+  assert.equal(q.inspect(turns).confirmed,1);
+});
