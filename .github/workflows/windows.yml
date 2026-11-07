@@ -7,7 +7,7 @@ jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write # one-time lockfile commit; revert to read after generation
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,7 +16,25 @@ jobs:
         with:
           node-version: '22'
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        shell: pwsh
+        run: |
+          if (Test-Path package-lock.json) {
+            npm ci --no-audit --no-fund
+          } else {
+            npm install --no-audit --no-fund
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Commit generated package-lock.json once
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          if ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "chore: lock npm dependencies for reproducible Windows builds"
+            git push origin HEAD:main
+          fi
       - name: Export resolved npm dependency lock
         uses: actions/upload-artifact@v4
         with:
