@@ -79,6 +79,12 @@
               </div>
               <label class="archive-json"><input type="checkbox" id="saveJson" checked> Дополнительно сохранять JSON</label>
             </div>
+            <div class="history-box">
+              <div class="archive-title">История и восстановление</div>
+              <p class="archive-help">В том числе незавершённые интервью и оценки, PDF для которых не удалось сохранить.</p>
+              <ol id="archiveHistory" class="archive-history"><li>Загружаю историю…</li></ol>
+              <button type="button" id="refreshArchiveHistory" class="archive-button">Обновить историю</button>
+            </div>
           </div>
           <div class="prep-note">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2 4.5 5v6c0 5 3.1 8.9 7.5 11 4.4-2.1 7.5-6 7.5-11V5L12 2Z" stroke="currentColor" stroke-width="1.6"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -133,6 +139,7 @@
         <p id="verdict" class="verdict"></p>
         <p id="archiveStatus" class="archive-status" role="status"></p>
         <button type="button" id="openResultFolder" class="archive-button" hidden>Открыть папку с отчётами</button>
+        <button type="button" id="retryReport" class="archive-button" hidden>Повторить сохранение PDF</button>
         <div class="result-section"><h3><span class="result-symbol positive">✓</span> Сильные стороны</h3><ul id="strengths"></ul></div>
         <div class="result-section"><h3><span class="result-symbol neutral">→</span> Что улучшить</h3><ul id="improve"></ul></div>
         <div class="result-section"><h3><span class="result-symbol forward">↗</span> Следующий шаг</h3><ul id="steps"></ul></div>

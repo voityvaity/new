@@ -186,3 +186,10 @@ button:focus-visible,input:focus-visible,select:focus-visible{
 .archive-status,.archive-notice{padding:11px 12px;border:1px solid #33576a;border-radius:10px;background:#112e3b;color:#c7e6e9;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
 .archive-status.warning,.archive-notice{border-color:#946778;background:#3b2532;color:#ffe3e9}
 #openResultFolder{margin:0 0 14px}
+
+.history-box{margin-top:18px;padding-top:18px;border-top:1px solid rgba(180,202,239,.14)}
+.archive-history{list-style:none;padding:0;margin:8px 0 12px;max-height:230px;overflow-y:auto}
+.archive-history li{border-bottom:1px solid #2e4056;padding:10px 0;font-size:11px;color:#bccde1;display:flex;gap:7px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.archive-history li span{overflow-wrap:anywhere;flex:1}
+.archive-history li button{flex-shrink:0}
+#retryReport{margin:0 0 14px}

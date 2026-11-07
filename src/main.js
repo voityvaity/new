@@ -5,23 +5,11 @@ const {createSettingsStore} = require('./secure-settings');
 const path = require('node:path');
 const {makeSession,makeGradeRequest,parseGrade,questionCount} = require('./logic');
 const {createInterviewArchive} = require('./interview-archive');
+const {printReport} = require('./pdf-printer');
 let mainWindow=null;
 let apiKey=null;
 let settings=null;
 let archive=null;
-
-async function printReport(html) {
-  const window = new BrowserWindow({
-    show:false, width:850, height:1100,
-    webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}
-  });
-  try {
-    await window.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));
-    return await window.webContents.printToPDF({pageSize:'A4',printBackground:true});
-  } finally {
-    if(!window.isDestroyed())window.destroy();
-  }
-}
 
 async function post(url,key,payload,timeout=60000) {
   const response=await fetch(url,{method:'POST',headers:{
@@ -83,14 +71,14 @@ ipcMain.handle('live:create',async(event,payload={})=>{
   if(typeof result?.transport?.sdp!=='string'||typeof result?.session?.id!=='string')
     throw new Error('OpenAI не прислал параметры голосового соединения.');
   apiKey=key;
-  let archiveWarning=null;
-  try{await archive.start(questionCount(count));}
+  let archiveWarning=null, archiveId=null;
+  try{archiveId=(await archive.start(questionCount(count))).id;}
   catch(err){archiveWarning='Не удалось создать черновик интервью: '+err.message;}
   let saveWarning=null;
   try{
     await settings.save({rememberKey,count,key});
   } catch(err){saveWarning=err.message;}
-  return {sdp:result.transport.sdp,saveWarning,archiveWarning};
+  return {sdp:result.transport.sdp,saveWarning,archiveWarning,archiveId};
 });
 
 ipcMain.handle('interview:grade',async(event,payload={})=>{
@@ -98,25 +86,44 @@ ipcMain.handle('interview:grade',async(event,payload={})=>{
   if(!apiKey)throw new Error('Сессия не активна. Начни интервью заново.');
   const request=makeGradeRequest(payload.turns,payload.count);
   const result=parseGrade(await post('https://api.openai.com/v1/responses',apiKey,request,90000));
-  let archiveResult=null;
-  let archiveWarning=null;
+  let archiveResult=null, archiveWarning=null, evaluationSaved=false;
   try{
+    if(!payload.archiveId)throw new Error('Архив интервью недоступен.');
+    // Save the already-paid-for evaluation locally BEFORE attempting PDF creation.
+    await archive.storeEvaluation(payload.archiveId,result);
+    evaluationSaved=true;
     const prefs=await settings.read();
-    archiveResult=await archive.finalize({
-      turns:payload.turns,evaluation:result,
-      reportDirectory:prefs.reportDirectory,saveJson:prefs.saveJson
-    });
+    archiveResult=await archive.exportReport(
+      payload.archiveId,prefs.reportDirectory,prefs.saveJson
+    );
   }catch(err){
-    archiveWarning='Оценка готова, но отчёт не сохранён полностью: '+err.message+
-      '. Черновик можно найти в папке данных приложения.';
+    archiveWarning=evaluationSaved
+      ? 'Оценка сохранена локально. PDF не создан: '+err.message+
+        '. Повтори экспорт без нового запроса к модели.'
+      : 'Не удалось надёжно сохранить оценку: '+err.message+
+        '. Скопируй результат с экрана.';
   }
   apiKey=null;
-  return {...result,archive:archiveResult,archiveWarning};
+  return {...result,archive:archiveResult,archiveWarning,evaluationSaved};
 });
 ipcMain.handle('interview:draft',async(event,payload={})=>{
   validateSender(event);
   if(!apiKey)throw new Error('Нет активного интервью.');
-  return archive.snapshot(payload.turns);
+  return archive.snapshot(payload.archiveId,payload.turns);
+});
+ipcMain.handle('interview:end',async(event,payload={})=>{
+  validateSender(event);
+  if(!apiKey)throw new Error('Нет активного интервью.');
+  return archive.end(payload.archiveId,payload.turns,payload.endedAt);
+});
+ipcMain.handle('reports:list',async event=>{
+  validateSender(event);
+  return archive.list();
+});
+ipcMain.handle('reports:export',async(event,payload={})=>{
+  validateSender(event);
+  const prefs=await settings.read();
+  return archive.exportReport(payload.id,prefs.reportDirectory,prefs.saveJson);
 });
 ipcMain.handle('interview:clear',event=>{validateSender(event);apiKey=null;return true;});
 

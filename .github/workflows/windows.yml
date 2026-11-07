@@ -19,6 +19,9 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Run tests
         run: npm test
+      - name: Render and validate real Electron PDF (graded and unfinished)
+        run: npm run test:pdf
+        timeout-minutes: 4
       - name: Validate high-resolution portrait
         shell: pwsh
         run: |

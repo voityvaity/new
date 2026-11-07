@@ -40,6 +40,11 @@ test('archive folder, JSON option and saved-report feedback are wired into UI',(
   for(const id of ['reportFolder','chooseReportsFolder','openReportsFolder','saveJson','archiveNotice','archiveStatus','openResultFolder'])
     assert.match(html,new RegExp('\\bid="'+id+'"'));
   assert.match(js,/window\.desktop\.chooseReportsFolder\(\)/);
-  assert.match(js,/window\.desktop\.saveDraft\(\{turns\}\)/);
+  assert.match(js,/window\.desktop\.saveDraft\(\{archiveId,turns\}\)/);
+  assert.match(js,/window\.desktop\.endInterview\(/);
+  assert.match(js,/window\.desktop\.listReports\(\)/);
+  assert.match(js,/window\.desktop\.exportReport\(/);
+  for(const id of ['archiveHistory','refreshArchiveHistory','retryReport'])
+    assert.match(html,new RegExp('\\bid="'+id+'"'));
   assert.match(js,/result\.archive\?\.pdfFile/);
 });
