@@ -342,21 +342,32 @@ function onEvent(evt) {
       break;
     case 'session.closed': {
       usageSeconds=window.LiveLifecycle.cumulativeUsage(usageSeconds,evt);
+      const idFromEvent=evt.session?.id;
+      if(idFromEvent && liveSessionId && idFromEvent!==liveSessionId){
+        status('Получено завершение другой сессии. Текущая сессия не подтверждена.',true);
+        break;
+      }
       const final={
-        sessionId:liveSessionId,reason:evt.reason||'close_requested',usageSeconds
+        sessionId:idFromEvent||liveSessionId,
+        reason:evt.reason||'close_requested',usageSeconds
       };
-      lastSessionClose=final;
-      // Only this server event confirms that WebRTC finalization completed.
+      // A terminal event is authoritative only for the matching session.
       void (async()=>{
-        if(final.sessionId)await window.desktop.confirmLiveClosed(final);
-      })().catch(error=>status('Сессия закрыта, но локальная запись подтверждения не удалась: '+error.message,true))
-        .finally(()=>{
-          if(closeResolve){closeResolve({confirmed:true});closeResolve=null;}
+        let accepted=false;
+        try{
+          if(final.sessionId)accepted=Boolean(await window.desktop.confirmLiveClosed(final));
+          if(accepted)lastSessionClose=final;
+          else status('Не удалось подтвердить завершение текущей сессии. Проверь статус перед новой тренировкой.',true);
+        }catch(error){
+          status('Не удалось сохранить подтверждение закрытия: '+error.message,true);
+        }finally{
+          if(closeResolve){closeResolve({confirmed:accepted});closeResolve=null;}
           else if(!finishing){
             if(liveActive)void stop('remote_closed');
             else void abortStartup('Голосовая сессия закрылась до начала интервью.');
           }
-        });
+        }
+      })();
       break;
     }
     case 'session.error':
