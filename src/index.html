@@ -12,27 +12,22 @@
   <header class="app-header">
     <div class="brand">
       <img class="brand-icon" src="../assets/quickcue-graphite.svg" alt="QuickCue">
-      <div class="brand-name">QuickCue <span>Python Junior Mock · подготовка к собеседованию</span></div>
+      <div class="brand-name">QuickCue</div>
     </div>
     <div class="header-right">
-      <span class="header-role">Python Developer · Junior</span>
       <span id="topStage" class="phase-pill">Подготовка</span>
     </div>
   </header>
 
   <main class="interview-layout">
     <section class="stage" aria-label="Ваш виртуальный интервьюер">
-      <div class="stage-top">
-        <span class="overline">Ваш собеседник</span>
-        <span class="stage-company">Python Backend <span>·</span> тренировочное интервью</span>
-      </div>
 
       <div class="photo-area">
         <div class="portrait-frame" id="portrait">
           <img src="../assets/interviewer.webp" alt="Александр — виртуальный интервьюер">
           <div class="portrait-overlay" aria-hidden="true"></div>
           <div class="portrait-name">
-            <span class="portrait-label">AI-интервьюер</span>
+            <span class="portrait-label">Интервьюер</span>
             <h1>Александр</h1>
           </div>
         </div>
@@ -44,34 +39,32 @@
           <div class="live-status"><span id="dot" class="status-dot" aria-hidden="true"></span><span id="status" role="status" aria-live="polite">Готов к собеседованию</span></div>
           <span id="timer" class="timer" hidden>00:00</span>
         </div>
-        <div class="stage-hint"><span class="hint-line" aria-hidden="true"></span><p id="excerpt">Не нужно готовить ответы заранее. Просто общайся голосом.</p></div>
       </div>
     </section>
 
     <aside class="workspace" aria-label="Управление собеседованием">
       <section id="panel" class="panel">
         <div id="setup">
-          <div class="eyebrow">Новая тренировка</div>
-          <h2>Потренируемся?</h2>
-          <p class="intro">Как на настоящем интервью: знакомство, Python, технические вопросы и уточнения по твоим ответам.</p>
+          <h2>Пробное собеседование</h2>
+          <p class="intro">Python Backend · Junior</p>
 
           <div class="setting-box">
             <label for="key">Ключ OpenAI API</label>
             <div class="password-field">
-              <input id="key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-proj-..." aria-describedby="privacy">
+              <input id="key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-proj-..." aria-label="Ключ OpenAI API">
               <button id="showKey" class="reveal-button" type="button" aria-label="Показать ключ" aria-pressed="false">Показать</button>
             </div>
-            <div class="remember-row"><label class="remember-option"><input id="rememberKey" type="checkbox" checked> Запомнить ключ на этом ПК</label><button type="button" id="clearKey" class="clear-key">Очистить</button></div><p id="privacy" class="field-helper">Ключ сохраняется локально в зашифрованном виде средствами Windows. Можно отключить сохранение.</p>
+            <div class="remember-row"><label class="remember-option"><input id="rememberKey" type="checkbox" checked> Запомнить ключ</label><button type="button" id="clearKey" class="clear-key">Очистить</button></div>
             <label for="count" class="count-label">Основных вопросов</label>
             <select id="count">
               <option value="5">5 вопросов · короткое</option>
               <option value="8" selected>8 вопросов · стандартное</option>
               <option value="10">10 вопросов · полное</option>
             </select>
-            <p class="field-helper">Лимит 30 минут · платная голосовая сессия завершится автоматически.</p>
+            <p class="field-helper">Лимит 30 минут</p>
+            <details class="extras" id="extras"><summary>Отчёты и история</summary>
             <div class="archive-options">
               <div class="archive-title">Автоматическое сохранение интервью</div>
-              <p class="archive-help">После оценки сохраняем PDF в указанную папку. Черновик расшифровки записывается по ходу разговора.</p>
               <div id="reportFolder" class="archive-path" title="Папка отчётов">Загружаю папку…</div>
               <div class="archive-actions">
                 <button type="button" id="chooseReportsFolder" class="archive-button">Выбрать папку</button>
@@ -81,32 +74,24 @@
             </div>
             <div class="history-box">
               <div class="archive-title">История и восстановление</div>
-              <p class="archive-help">В том числе незавершённые интервью и оценки, PDF для которых не удалось сохранить.</p>
               <ol id="archiveHistory" class="archive-history"><li>Загружаю историю…</li></ol>
-              <button type="button" id="refreshArchiveHistory" class="archive-button">Обновить историю</button>
             </div>
+            </details>
           </div>
           <div id="liveClosureNotice" class="archive-notice" hidden>
             <span id="liveClosureText">Предыдущая голосовая сессия завершилась без подтверждения.</span>
             <button id="acknowledgeLive" class="archive-button" type="button">Продолжить на свой риск</button>
           </div>
-          <div class="prep-note">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2 4.5 5v6c0 5 3.1 8.9 7.5 11 4.4-2.1 7.5-6 7.5-11V5L12 2Z" stroke="currentColor" stroke-width="1.6"/><path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <span>Это неофициальная тренировка в формате технического интервью. Нужны микрофон и доступ к OpenAI API.</span>
-          </div>
         </div>
 
         <div id="conversation" hidden>
           <p id="archiveNotice" class="archive-notice" hidden></p>
-          <div class="eyebrow">Собеседование</div>
-          <h2>Разговор начался</h2>
-          <p class="intro">Слушай вопрос и отвечай в своём темпе. Можно попросить повторить.</p>
+          <h2>Интервью</h2>
           <div class="session-details">
             <span class="sound-bars" id="soundBars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
             <div><strong id="liveSpeaker">В ожидании первого вопроса</strong><span id="plannedCount">8 основных вопросов</span><span id="remainingTime">Осталось 30:00</span></div>
           </div>
           <div class="utterance" aria-live="off">
-            <div class="utterance-label">Последняя реплика</div>
             <p id="liveText">Сейчас Александр начнёт интервью…</p>
           </div>
           <button type="button" id="repeatFirstQuestion" class="archive-button" hidden>Повторить первый вопрос</button>
@@ -117,9 +102,7 @@
         </div>
 
         <div id="faultInfo" hidden>
-          <div class="eyebrow">Проверка результата</div>
-          <h2>Проверяем ответы</h2>
-          <p class="intro">Если оценка не появилась, попробуй ещё раз или начни новую тренировку.</p>
+          <h2>Оценка</h2>
         </div>
 
         <div class="controls">
@@ -140,8 +123,7 @@
       </section>
 
       <section id="results" class="results" hidden>
-        <div class="eyebrow">Твой результат</div>
-        <div class="result-hero"><div><h2>Интервью окончено</h2><p>Вот что удалось и над чем поработать.</p></div><div class="score"><strong id="score">—</strong><span>/10</span></div></div>
+        <div class="result-hero"><div><h2>Результат</h2></div><div class="score"><strong id="score">—</strong><span>/10</span></div></div>
         <p id="verdict" class="verdict"></p>
         <p id="archiveStatus" class="archive-status" role="status"></p>
         <button type="button" id="openResultFolder" class="archive-button" hidden>Открыть папку с отчётами</button>
@@ -151,7 +133,6 @@
         <div class="result-section"><h3><span class="result-symbol forward">↗</span> Следующий шаг</h3><ul id="steps"></ul></div>
         <button id="again" class="button button-primary" type="button">Новое интервью</button>
       </section>
-      <p class="workspace-footnote">QuickCue · Локальное сохранение результатов · GPT-Live-1</p>
     </aside>
   </main>
 </div>

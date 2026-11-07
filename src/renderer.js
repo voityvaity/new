@@ -79,7 +79,6 @@ function activateLive(){
   phase('active');
   beginClock();
   $('key').value='';
-  $('excerpt').textContent='Слушай вопрос и отвечай голосом. Можно попросить повторить.';
   status(firstOutputSeen?'Интервью идёт · слушаю'
     :'Соединение готово · ожидаю первый вопрос');
   if(!firstOutputSeen)requestOpening();
@@ -97,6 +96,8 @@ async function abortStartup(message){
 }
 function refreshTranscript(){
   const list=$('transcriptList');
+  const wrap=$('transcriptWrap');
+  const wasAtBottom=wrap.hidden || wrap.scrollHeight-wrap.scrollTop-wrap.clientHeight<=48;
   list.replaceChildren();
   for(const turn of transcript.slice(-30)){
     if(!turn.text.trim())continue;
@@ -108,7 +109,7 @@ function refreshTranscript(){
     item.append(name,line);
     list.append(item);
   }
-  $('transcriptWrap').scrollTop=$('transcriptWrap').scrollHeight;
+  if(wasAtBottom)wrap.scrollTop=wrap.scrollHeight;
 }
 function toggleTranscript(open){
   showTranscript=Boolean(open);
@@ -227,8 +228,8 @@ function phase(mode) {
   $('timer').hidden=!active;
   $('topStage').textContent=idle?'Подготовка':connecting?'Подключение':active?'Интервью идёт':fault?'Завершение':'Результат';
   $('plannedCount').textContent=questionTracker.confirmed
-    ? 'Основных вопросов: '+questionTracker.confirmed+' из '+requested
-    : 'План: '+requested+' основных вопросов';
+    ? questionTracker.confirmed+' / '+requested+' вопросов'
+    : requested+' вопросов';
   $('start').hidden=!idle;
   $('cancelConnecting').hidden=!connecting;
   $('mute').hidden=!active;
@@ -281,7 +282,7 @@ function appendTranscript(role,evt) {
     const before=questionTracker.confirmed;
     const progress=questionTracker.inspect(transcript);
     if(progress.confirmed!==before)
-      $('plannedCount').textContent='Основных вопросов: '+progress.confirmed+' из '+requested;
+      $('plannedCount').textContent=progress.confirmed+' / '+requested+' вопросов';
     if(progress.gapDetected&&!numberingWarningSent){
       numberingWarningSent=true;
       send('session.instructions.append',{
@@ -292,7 +293,6 @@ function appendTranscript(role,evt) {
     }
     if(progress.complete&&!limitNoticeSent){
       limitNoticeSent=true;
-      $('stop').textContent='Завершить после ответа';
       send('session.instructions.append',{
         event_id:'questions-complete-'+Date.now(),delegation_id:null,
         content:'Основных вопросов уже '+requested+' из '+requested+
@@ -300,10 +300,13 @@ function appendTranscript(role,evt) {
       });
     }
     if(progress.overLimit&&!extraQuestionStopped&&!finishing){
+      // Regex-based observation may mistake a quoted question label for a
+      // real question. Never stop a paid interview based on this heuristic.
       extraQuestionStopped=true;
-      status('Лимит основных вопросов достигнут. Завершаю интервью.',true);
-      // Buffered output may still play, but we refuse to continue a new question.
-      void stop();
+      send('session.instructions.append',{
+        event_id:'extra-question-'+Date.now(),delegation_id:null,
+        content:'Не задавай новых основных вопросов. Дождись ответа на текущий вопрос.'
+      });
     }
   }
   if(showTranscript)refreshTranscript();
@@ -573,8 +576,7 @@ async function grade() {
     lastReportId=archiveId;
     const saved=Boolean(result.archive?.pdfFile);
     $('archiveStatus').textContent=saved
-      ? 'Отчёт автоматически сохранён: '+result.archive.pdfFile+
-        (result.archive.jsonFile?' · JSON тоже сохранён':'')
+      ? 'Отчёт сохранён'
       : result.archiveWarning||'PDF не сохранён. Проверь папку отчётов.';
     $('archiveStatus').classList.toggle('warning',!saved);
     $('openResultFolder').hidden=!saved;
@@ -585,7 +587,6 @@ async function grade() {
         const li=document.createElement('li');li.textContent=String(item);list.append(li);
       }
     }
-    $('excerpt').textContent='Интервью завершено. Ниже — оценка твоих ответов.';
     phase('result');status('Результат готов');
     void refreshArchiveHistory();
   } catch(error) {
@@ -613,7 +614,6 @@ function reset() {
   $('showKey').textContent='Показать';
   $('showKey').setAttribute('aria-label','Показать ключ');
   $('showKey').setAttribute('aria-pressed','false');
-  $('excerpt').textContent='Новая попытка: поговори с интервьюером голосом.';
   phase('idle');status('Готов к собеседованию');
   void refreshArchiveHistory();
   void refreshLiveStatus();
@@ -664,7 +664,6 @@ async function openReportsFolder() {
 }
 $('openReportsFolder').addEventListener('click',()=>{void openReportsFolder();});
 $('openResultFolder').addEventListener('click',()=>{void openReportsFolder();});
-$('refreshArchiveHistory').addEventListener('click',()=>{void refreshArchiveHistory();});
 $('retryReport').addEventListener('click',async()=>{
   if(!lastReportId)return;
   $('retryReport').disabled=true;
@@ -683,7 +682,8 @@ $('saveJson').addEventListener('change',()=>{
   void window.desktop.savePrefs({saveJson:$('saveJson').checked}).catch(error=>status(error.message,true));
 });
 $('count').addEventListener('change',()=>{
-  void window.desktop?.savePrefs({count:Number($('count').value)}).catch(()=>{});
+  void window.desktop?.savePrefs({count:Number($('count').value)})
+    .catch(error=>status('Не удалось сохранить выбор: '+error.message,true));
 });
 $('start').addEventListener('click',begin);
 $('acknowledgeLive').addEventListener('click',async()=>{

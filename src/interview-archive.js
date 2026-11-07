@@ -127,6 +127,16 @@ function createInterviewArchive({draftDirectory, generatePdf}) {
       return {id:next.id};
     });
   }
+  function discardEmpty(id) {
+    return enqueue(async()=>{
+      const record=await read(id);
+      if(record.transcript.length||record.endedAt||record.evaluation)
+        throw new Error('Нельзя удалить интервью с данными.');
+      await fs.rm(recordPath(id));
+      if(active?.id===id)active=null;
+      return {removed:true};
+    });
+  }
   function snapshot(id, turns) {
     return enqueue(async () => {
       if (!active || active.id !== id || active.endedAt) return null;
@@ -206,7 +216,7 @@ function createInterviewArchive({draftDirectory, generatePdf}) {
       return {pdfFile, jsonFile, directory:reportDirectory};
     });
   }
-  return {start, snapshot, end, getEvaluation, storeEvaluation, list, exportReport};
+  return {start, discardEmpty, snapshot, end, getEvaluation, storeEvaluation, list, exportReport};
 }
 
 module.exports = {createInterviewArchive, cleanTurns, escapeHtml, durationLabel, reportHtml, filenameFor, atomicWrite};

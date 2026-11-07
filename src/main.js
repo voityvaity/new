@@ -8,6 +8,7 @@ const {createInterviewArchive,atomicWrite} = require('./interview-archive');
 const {printReport} = require('./pdf-printer');
 const {createLiveGuard} = require('./live-lifecycle');
 const {createKeyRetentionPolicy} = require('./key-retention');
+const {recoverLiveJournal,canStartLive} = require('./live-journal');
 let mainWindow=null;
 let apiKey=null;
 let settings=null;
@@ -57,7 +58,9 @@ async function post(url,key,payload,timeout=60000) {
   try { json=JSON.parse(raw); } catch {}
   if (!response.ok) {
     const reason=typeof json?.error?.message==='string' ? json.error.message.slice(0,220):('HTTP '+response.status);
-    throw new Error('Ошибка OpenAI API: '+reason);
+    const error=new Error('Ошибка OpenAI API: '+reason);
+    if(url.endsWith('/live/sessions'))error.liveCreationRejected=true;
+    throw error;
   }
   if (!json||typeof json!=='object') throw new Error('Неожиданный ответ OpenAI API.');
   return json;
@@ -112,10 +115,26 @@ function createWindow() {
 app.whenReady().then(()=>{
   const userData=app.getPath('userData');
   closureStatusFile=path.join(userData,'live-closure-status.json');
-  closureLoaded=fs.readFile(closureStatusFile,'utf8').then(raw=>{
-    storedClosure=JSON.parse(raw);
-    if(storedClosure?.state==='confirmed')storedClosure=null;
-  }).catch(()=>{});
+  closureLoaded=fs.readFile(closureStatusFile,'utf8').then(async raw=>{
+    let value;
+    try{value=JSON.parse(raw);}
+    catch{
+      // Corrupt state cannot establish that the last paid call ended safely.
+      value={state:'unconfirmed',reason:'corrupt_local_live_journal',
+        at:new Date().toISOString()};
+    }
+    const recovered=recoverLiveJournal(value);
+    storedClosure=recovered || value;
+    if(recovered && value.state!=='unconfirmed')
+      await rememberClosure(recovered);
+  }).catch(error=>{
+    if(error.code==='ENOENT'){storedClosure=null;return;}
+    // Fail closed on permissions or disk errors instead of silently starting
+    // a possibly second paid Live session.
+    storedClosure={state:'unconfirmed',
+      reason:'unreadable_local_live_journal',at:new Date().toISOString()};
+    console.warn('Live journal unreadable:',error.message);
+  });
   settings=createSettingsStore({
     userData, secureStorage:safeStorage,
     defaultReportDirectory:path.join(app.getPath('documents'),'Python Junior Mock','Интервью')
@@ -188,68 +207,83 @@ app.on('before-quit',event=>{
 ipcMain.handle('live:create',async(event,payload={})=>{
   validateSender(event);
   const {key,sdp,count,rememberKey}=payload||{};
-  if(typeof key!=='string'||!key.startsWith('sk-')||key.length>512)throw new Error('Нужен ключ OpenAI API (sk-...).');
-  if(typeof sdp!=='string'||!sdp.startsWith('v=0')||sdp.length>65536)throw new Error('Некорректный SDP микрофона.');
+  if(typeof key!=='string'||!key.startsWith('sk-')||key.length>512)
+    throw new Error('Нужен ключ OpenAI API (sk-...).');
+  if(typeof sdp!=='string'||!sdp.startsWith('v=0')||sdp.length>65536)
+    throw new Error('Некорректный SDP микрофона.');
   await closureLoaded;
-  if(storedClosure?.state==='unconfirmed')
-    throw new Error('Завершение предыдущей голосовой сессии не подтверждено. Проверь предупреждение и подтверди продолжение на свой риск.');
+  if(!canStartLive(storedClosure))
+    throw new Error('Предыдущее платное подключение не подтверждено завершённым. Проверь состояние перед новой попыткой.');
   if(creatingLive || liveGuard.hasActive())
     throw new Error('Предыдущая платная сессия ещё не подтверждена закрытой.');
   creatingLive=true;
   cancelPendingCreate=false;
   const savedKeyRevision=keyRetention.snapshot();
+  let archiveId=null,requestSent=false,sessionId=null,requestedAt=null;
   try{
-  const requestedAt=Date.now();
-  creatingLivePromise=post('https://api.openai.com/v1/live/sessions',key,{
-    session:makeSession(count),transport:{type:'webrtc',sdp}
-  },45000);
-  let result;
-  try{result=await creatingLivePromise;}
-  catch(error){
-    // A transport failure can leave the outcome unknown: a remote session
-    // might exist even if the response containing its ID never arrived.
-    if(error?.name==='TimeoutError'||error?.name==='AbortError'||
-       error?.cause?.code==='ECONNRESET'){
-      await rememberClosure({state:'unconfirmed',
-        reason:'live_creation_response_unknown',at:new Date().toISOString()});
+    // A disk failure must not leave the user paying for a call with no draft.
+    archiveId=(await archive.start(questionCount(count))).id;
+    requestedAt=Date.now();
+    await rememberClosure({state:'creating',archiveId,startedAt:requestedAt,
+      at:new Date().toISOString()});
+    requestSent=true;
+    creatingLivePromise=post('https://api.openai.com/v1/live/sessions',key,{
+      session:makeSession(count),transport:{type:'webrtc',sdp}
+    },45000);
+    let result;
+    try{result=await creatingLivePromise;}
+    catch(error){
+      // A rejected HTTP request is not a started Live session; a transport
+      // failure or timeout has an unknown outcome and must remain journaled.
+      if(error?.liveCreationRejected){
+        await rememberClosure({state:'creation_rejected',archiveId,
+          reason:'http_rejected',at:new Date().toISOString()});
+        await archive.discardEmpty(archiveId).catch(()=>{});
+      }else{
+        await rememberClosure({state:'unconfirmed',archiveId,
+          reason:'live_creation_response_unknown',at:new Date().toISOString()});
+      }
+      throw error;
+    }
+    sessionId=typeof result?.session?.id==='string'?result.session.id:null;
+    if(!sessionId || typeof result?.transport?.sdp!=='string'){
+      await rememberClosure({state:'unconfirmed',sessionId,archiveId,
+        reason:'live_create_response_missing_parameters',at:new Date().toISOString()});
+      if(sessionId)void hangupRemote(sessionId,key).catch(()=>{});
+      throw new Error('OpenAI не прислал параметры голосового соединения.');
+    }
+    // Must be durable before the UI sees the answer or a new session can start.
+    await rememberClosure({state:'active',sessionId,archiveId,
+      startedAt:requestedAt,at:new Date().toISOString()});
+    const liveInfo=liveGuard.activate({id:sessionId,key,startedAt:requestedAt});
+    if(cancelPendingCreate){
+      liveGuard.requestClose('cancelled_startup');
+      throw new Error('Подключение отменено; завершение платной сессии не подтверждено.');
+    }
+    apiKey=key;
+    let saveWarning=null;
+    try{
+      await settings.save(keyRetention.payload(savedKeyRevision,{rememberKey,count,key}));
+    }catch(error){saveWarning=error.message;}
+    return {sdp:result.transport.sdp,saveWarning,archiveId,...liveInfo};
+  }catch(error){
+    if(!requestSent && archiveId){
+      await archive.discardEmpty(archiveId).catch(()=>{});
+    }
+    // The "active" journal and in-memory guard stay intact after errors
+    // that occur once a remote session may exist.
+    if(sessionId && !liveGuard.hasActive()){
+      // The server may already be billing us: keep the warning even if
+      // registering the guard or persisting the active marker failed.
+      try{
+        await rememberClosure({state:'unconfirmed',sessionId,archiveId,
+          reason:'remote_session_not_registered',at:new Date().toISOString()});
+      }catch(writeError){
+        console.warn('Failed to persist uncertain paid session:',writeError.message);
+      }
+      void hangupRemote(sessionId,key).catch(()=>{});
     }
     throw error;
-  }
-  if(typeof result?.transport?.sdp!=='string'||typeof result?.session?.id!=='string'){
-    await rememberClosure({state:'unconfirmed',
-      sessionId:typeof result?.session?.id==='string'?result.session.id:null,
-      reason:'live_create_response_missing_parameters',at:new Date().toISOString()});
-    if(typeof result?.session?.id==='string')
-      void hangupRemote(result.session.id,key).catch(()=>{});
-    throw new Error('OpenAI не прислал параметры голосового соединения.');
-  }
-  if(cancelPendingCreate){
-    // No WebRTC data channel may exist yet. Keep the ID and report uncertainty
-    // rather than claiming that the SIP fallback authoritatively closed it.
-    try{liveGuard.activate({id:result.session.id,key,startedAt:requestedAt});
-      liveGuard.requestClose('cancelled_startup');}
-    catch(error){console.warn('Cancelled startup cleanup:',error.message);}
-    throw new Error('Подключение отменено; завершение сессии проверяется.');
-  }
-  let liveInfo;
-  try{
-    liveInfo=liveGuard.activate({id:result.session.id,key,startedAt:requestedAt});
-  }catch(error){
-    await rememberClosure({state:'unconfirmed',sessionId:result.session.id,
-      reason:'could_not_register_live_session',at:new Date().toISOString()});
-    throw error;
-  }
-  apiKey=key;
-  let archiveWarning=null, archiveId=null;
-  try{archiveId=(await archive.start(questionCount(count))).id;}
-  catch(err){archiveWarning='Не удалось создать черновик интервью: '+err.message;}
-  let saveWarning=null;
-  try{
-    // If the user cleared the key or changed key retention while connecting,
-    // never resurrect their previous key with this late async write.
-    await settings.save(keyRetention.payload(savedKeyRevision,{rememberKey,count,key}));
-  } catch(err){saveWarning=err.message;}
-  return {sdp:result.transport.sdp,saveWarning,archiveWarning,archiveId,...liveInfo};
   }finally{
     creatingLive=false;
     creatingLivePromise=null;

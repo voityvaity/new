@@ -45,7 +45,7 @@ test('archive folder, JSON option and saved-report feedback are wired into UI',(
   assert.match(js,/window\.desktop\.endInterview\(/);
   assert.match(js,/window\.desktop\.listReports\(\)/);
   assert.match(js,/window\.desktop\.exportReport\(/);
-  for(const id of ['archiveHistory','refreshArchiveHistory','retryReport'])
+  for(const id of ['archiveHistory','extras','retryReport'])
     assert.match(html,new RegExp('\\bid="'+id+'"'));
   assert.match(js,/result\.archive\?\.pdfFile/);
 });
@@ -126,4 +126,23 @@ test('unknown closure is surfaced instead of silently allowing overlapping sessi
   assert.match(main,/live_creation_response_unknown/);
   assert.match(main,/window-close-request/);
   assert.match(js,/refreshLiveStatus/);
+});
+
+test('minimal preparation separates essentials from optional report controls',()=>{
+  assert.match(html,/<details class="extras" id="extras">/);
+  assert.match(html,/<summary>Отчёты и история<\/summary>/);
+  assert.doesNotMatch(html,/id="refreshArchiveHistory"/);
+  assert.doesNotMatch(html,/class="workspace-footnote"/);
+  assert.doesNotMatch(html,/>Потренируемся\?</);
+  assert.doesNotMatch(html,/Ключ сохраняется локально в зашифрованном виде/);
+  const collapsed=html.indexOf('<details class="extras"');
+  assert.ok(collapsed>html.indexOf('id="count"'));
+  assert.ok(html.indexOf('id="archiveHistory"')>collapsed);
+  assert.ok(html.indexOf('id="start"')>collapsed);
+});
+test('question estimate cannot forcibly end a paid interview',()=>{
+  assert.doesNotMatch(js,/if\(progress\.overLimit[\s\S]{0,380}void stop\(/);
+  assert.doesNotMatch(js,/Завершить после ответа/);
+  assert.match(js,/extraQuestionStopped/);
+  assert.match(html,/Завершить и оценить/);
 });

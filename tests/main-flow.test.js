@@ -5,9 +5,10 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
 
-function makeHarness() {
+function makeHarness({archiveStartFails=false,rejectLive=false}={}) {
   const handlers=new Map(),windowHandlers=new Map(),settingsWrites=[];
-  const browserEvents=[];
+  const browserEvents=[],operationOrder=[],journalStates=[];
+  let discarded=0;
   let win;
   let resolveLive,resolveGrade,gradeRequests=0,creationRequests=0;
   let storedGrade=null;
@@ -22,7 +23,12 @@ function makeHarness() {
     }
   };
   const fakeArchive={
-    start:async()=>({id:'archive-1'}),
+    start:async()=>{
+      operationOrder.push('archive');
+      if(archiveStartFails)throw Error('disk full');
+      return {id:'archive-1'};
+    },
+    discardEmpty:async()=>{discarded++;return {removed:true};},
     getEvaluation:async()=>storedGrade,
     storeEvaluation:async(_id,value)=>{storedGrade=value;},
     exportReport:async()=>({pdfFile:'C:\\MockReports\\report.pdf',jsonFile:null}),
@@ -78,11 +84,17 @@ function makeHarness() {
   const sandbox={
     require(name){
       if(name==='electron')return fakeElectron;
-      if(name==='node:fs/promises')return {readFile:async()=>{throw Error('no closure state');}};
+      if(name==='node:fs/promises')return {readFile:async()=>{
+        const error=Error('no closure state');error.code='ENOENT';throw error;
+      }};
       if(name==='./secure-settings')return {createSettingsStore:()=>fakeSettings};
       if(name==='./interview-archive')return {
         createInterviewArchive:()=>fakeArchive,
-        atomicWrite:async()=>{}
+        atomicWrite:async(_file,body)=>{
+          const value=JSON.parse(body);
+          journalStates.push(value.state);
+          operationOrder.push('journal:'+value.state);
+        }
       };
       if(name==='./pdf-printer')return {printReport:async()=>Buffer.from('%PDF-1.7')};
       if(name==='./live-lifecycle')return {createLiveGuard:()=>fakeGuard};
@@ -97,7 +109,11 @@ function makeHarness() {
     setTimeout,clearTimeout,
     fetch(url){
       if(url.endsWith('/live/sessions')){
+        operationOrder.push('http');
         creationRequests++;
+        if(rejectLive)return Promise.resolve({
+          ok:false,status:401,text:async()=>JSON.stringify({error:{message:'Unauthorized'}})
+        });
         return new Promise(resolve=>{resolveLive=()=>resolve({
           ok:true,text:async()=>JSON.stringify({
             session:{id:'live-test'},transport:{sdp:'v=0\\r\\nanswer'}
@@ -126,6 +142,8 @@ function makeHarness() {
     handlers,
     settingsWrites,
     browserEvents,
+    operationOrder,journalStates,
+    get discarded(){return discarded;},
     windowHandlers,
     get win(){return win;},
     get sender(){return {sender:fakeWebContents};},
@@ -181,4 +199,33 @@ test('duplicate grading is one paid call and closing the window waits for persis
   assert.equal(h.storedGrade.score,2);
   await h.tick();
   assert.equal(h.destroyed,true,'Window must close after paid result was persisted');
+});
+
+test('archive and durable creation marker precede every paid Live HTTP request',async()=>{
+  const h=makeHarness();await h.tick();
+  const task=h.handlers.get('live:create')(h.sender,{
+    key:'sk-valid',sdp:'v=0\\r\\noffer',count:5,rememberKey:false
+  });
+  await h.tick();
+  assert.deepEqual(h.operationOrder.slice(0,3),
+    ['archive','journal:creating','http']);
+  h.releaseLive();
+  await task;
+  assert.ok(h.journalStates.includes('active'),
+    'Session ID must be recorded before a successful create response');
+});
+test('disk failure prevents creating a paid session',async()=>{
+  const h=makeHarness({archiveStartFails:true});await h.tick();
+  await assert.rejects(h.handlers.get('live:create')(h.sender,{
+    key:'sk-valid',sdp:'v=0\\r\\noffer',count:5,rememberKey:false
+  }),/disk full/);
+  assert.equal(h.creationRequests,0);
+});
+test('rejected Live creation releases an empty local draft without leaving a billing lock',async()=>{
+  const h=makeHarness({rejectLive:true});await h.tick();
+  await assert.rejects(h.handlers.get('live:create')(h.sender,{
+    key:'sk-valid',sdp:'v=0\\r\\noffer',count:5,rememberKey:false
+  }),/Unauthorized/);
+  assert.equal(h.discarded,1);
+  assert.deepEqual(h.journalStates,['creating','creation_rejected']);
 });

@@ -24,6 +24,9 @@ async function check(mode) {
       'panelBackground:getComputedStyle(panel).backgroundColor,',
       'accent:styles.getPropertyValue("--accent").trim(),',
       'startVisible:!document.querySelector("#start").hidden,',
+      'startRect:(()=>{const r=document.querySelector("#start").getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height};})(),',
+      'viewportHeight:window.innerHeight,',
+      'extrasCollapsed:!document.querySelector("#extras").open,',
       'fields:!!document.querySelector("#key")&&!!document.querySelector("#count")};',
       '})()'
     ].join('\n');
@@ -33,6 +36,11 @@ async function check(mode) {
     assert.equal(state.iconHeight,1024);
     assert.equal(state.accent,mode==='dark'?'#0a84ff':'#007aff');
     assert.equal(state.startVisible,true);
+    assert.equal(state.extrasCollapsed,true,'Optional settings must start collapsed');
+    assert.ok(state.startRect.height>=44,'Primary action is too small');
+    assert.ok(state.startRect.top>=0 && state.startRect.bottom<=state.viewportHeight,
+      'Start button is outside the visible viewport: '+JSON.stringify(state.startRect)+
+      ' of '+state.viewportHeight);
     assert.equal(state.fields,true);
     assert.notEqual(state.panelBackground,'rgba(0, 0, 0, 0)');
     const image=await window.webContents.capturePage();
