@@ -99,6 +99,7 @@ function makeHarness({archiveStartFails=false,rejectLive=false}={}) {
       if(name==='./pdf-printer')return {printReport:async()=>Buffer.from('%PDF-1.7')};
       if(name==='./live-lifecycle')return {createLiveGuard:()=>fakeGuard};
       if(name==='./key-retention')return policy;
+      if(name==='./live-journal')return require('../src/live-journal');
       if(name==='./logic')return models;
       return require(name);
     },
