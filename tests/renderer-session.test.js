@@ -58,7 +58,7 @@ test('renderer never reports confirmed closing when main rejects the session ID'
   assert.equal(h.confirmations,1);
   assert.equal(h.getResult()?.confirmed,false);
   assert.equal(h.getFinal(),null);
-  assert.match(h.get('status').textContent,/Не удалось подтвердить/);
+  assert.match(h.get('error').textContent,/Не удалось подтвердить/);
 });
 
 test('matching session with main-process acknowledgment confirms closing',async()=>{
@@ -80,5 +80,5 @@ test('terminal event for unrelated session is ignored',async()=>{
   assert.equal(h.confirmations,0);
   assert.equal(h.getFinal(),null);
   assert.equal(h.getResult(),undefined);
-  assert.match(h.get('status').textContent,/другой сессии/);
+  assert.match(h.get('error').textContent,/другой сессии/);
 });
